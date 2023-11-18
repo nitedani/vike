@@ -10,6 +10,7 @@ import { resolveExtensions } from './resolveExtensions.js'
 import { resolveBase } from './resolveBase.js'
 import { getVikeConfig } from '../importUserCode/v1-design/getVikeConfig.js'
 import pc from '@brillout/picocolors'
+import { setReadGitignore } from '../../shared/readGitignore.js'
 
 function resolveVikeConfig(vikeConfig: unknown): Plugin {
   return {
@@ -30,6 +31,8 @@ async function getConfigVikPromise(vikeConfig: unknown, config: ResolvedConfig):
 
   const configs = [fromPluginOptions, ...fromStemPackages, fromViteConfig]
 
+  const { readGitignore = false } = fromPluginOptions
+  setReadGitignore(readGitignore)
   const extensions = resolveExtensions(configs, config)
 
   const { globalVikeConfig: fromPlusConfigFile } = await getVikeConfig(config, isDev2(config), false, extensions)
@@ -54,7 +57,8 @@ async function getConfigVikPromise(vikeConfig: unknown, config: ResolvedConfig):
     baseAssets,
     redirects: merge(configs.map((c) => c.redirects)) ?? {},
     disableUrlNormalization: pickFirst(configs.map((c) => c.disableUrlNormalization)) ?? false,
-    trailingSlash: pickFirst(configs.map((c) => c.trailingSlash)) ?? false
+    trailingSlash: pickFirst(configs.map((c) => c.trailingSlash)) ?? false,
+    readGitignore
   }
 
   return configVike

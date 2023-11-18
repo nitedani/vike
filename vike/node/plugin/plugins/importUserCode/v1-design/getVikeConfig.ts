@@ -75,6 +75,7 @@ import {
 import { getConfigValueSerialized } from './getVirtualFilePageConfigs.js'
 import type { ResolvedConfig } from 'vite'
 import { getConfigVike } from '../../../../shared/getConfigVike.js'
+import { readGitignore } from '../../../shared/readGitignore.js'
 
 assertIsNotProductionRuntime()
 
@@ -1126,7 +1127,7 @@ async function findPlusFiles(
   const timeBase = new Date().getTime()
   assertPosixPath(userRootDir)
 
-  const ignorePatterns = []
+  const ignorePatterns = await readGitignore(userRootDir)
   for (const dir of ignoreDirs) {
     assertPosixPath(dir)
     ignorePatterns.push(`${path.posix.relative(userRootDir, dir)}/**`)

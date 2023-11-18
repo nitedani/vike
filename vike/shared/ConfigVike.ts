@@ -42,6 +42,7 @@ type ConfigVikeResolved = {
   redirects: Record<string, string>
   trailingSlash: boolean
   disableUrlNormalization: boolean
+  readGitignore: boolean;
 }
 
 type ConfigVikeUserProvided = {
@@ -141,4 +142,10 @@ type ConfigVikeUserProvided = {
    * @default false
    */
   disableUrlNormalization?: boolean
+
+  /** Disable scanning for page and config files for paths specified in .gitignore
+   *
+   * @default false
+   */
+  readGitignore?: boolean
 }

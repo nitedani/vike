@@ -5,14 +5,16 @@ import type { ResolvedConfig } from 'vite'
 import { assertWarning, toPosixPath, scriptFileExtensions, getOutDirs } from '../utils.js'
 import type { FileType } from '../../../shared/getPageFiles/fileTypes.js'
 import pc from '@brillout/picocolors'
+import { readGitignore } from './readGitignore.js'
 
 async function findPageFiles(config: ResolvedConfig, fileTypes: FileType[], isDev: boolean): Promise<string[]> {
   const cwd = config.root
   const { outDirRoot } = getOutDirs(config)
   const timeBase = new Date().getTime()
+  const ignorePatterns = await readGitignore(cwd)
   let pageFiles = await glob(
     fileTypes.map((fileType) => `**/*${fileType}.${scriptFileExtensions}`),
-    { ignore: ['**/node_modules/**', `${outDirRoot}/**`], cwd, dot: false }
+    { ignore: ['**/node_modules/**', `${outDirRoot}/**`, ...ignorePatterns], cwd, dot: false }
   )
   pageFiles = pageFiles.map((p) => '/' + toPosixPath(p))
   const time = new Date().getTime() - timeBase
