@@ -39,7 +39,7 @@ function pluginBuildConfig(): Plugin[] {
       configResolved: {
         order: 'post',
         async handler(config) {
-          handleAssetsManifest_alignCssTarget(config)
+          await handleAssetsManifest_alignCssTarget(config)
           onSetupBuild()
           assertRollupInput(config)
           // Inject the entries per environment: Vite builds an environment from

@@ -14,7 +14,10 @@ import { assert } from '../../../../utils/assert.js'
 import { getFileSuffixes } from '../../../../shared-server-node/getFileSuffixes.js'
 import '../../assertEnvVite.js'
 
-type RuntimeEnv = { isForClientSide: boolean; isClientRouting: boolean; isDev?: boolean } | { isForConfig: true }
+type RuntimeEnv =
+  | { isForClientSide: boolean; isClientRouting: boolean; isDev?: boolean }
+  | { environmentName: string; isDev?: boolean }
+  | { isForConfig: true }
 
 type PageConfigPartial = Pick<
   PageConfigBuildTime | PageConfigGlobalBuildTime,
@@ -78,11 +81,16 @@ function isRuntimeEnvMatch(configEnv: ConfigEnv, runtimeEnv: RuntimeEnv): boolea
   if ('isForConfig' in runtimeEnv) return !!configEnv.config
 
   // Runtime
-  if (!runtimeEnv.isForClientSide) {
-    if (!configEnv.server) return false
+  if ('environmentName' in runtimeEnv) {
+    const runtimes = configEnv.runtimes === undefined ? [] : [configEnv.runtimes].flat()
+    if (!runtimes.includes(runtimeEnv.environmentName)) return false
   } else {
-    if (!configEnv.client) return false
-    if (configEnv.client === 'if-client-routing' && !runtimeEnv.isClientRouting) return false
+    if (!runtimeEnv.isForClientSide) {
+      if (!configEnv.server) return false
+    } else {
+      if (!configEnv.client) return false
+      if (configEnv.client === 'if-client-routing' && !runtimeEnv.isClientRouting) return false
+    }
   }
 
   // Production/development

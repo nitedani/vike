@@ -13,6 +13,7 @@ import {
 import { handleAssetsManifest_isFixEnabled } from '../build/handleAssetsManifest.js'
 import { getConfigValueBuildTime } from '../../../../shared-server-client/page-configs/getConfigValueBuildTime.js'
 import { resolveIncludeAssetsImportedByServer } from '../../../../server/runtime/renderPageServer/getPageAssets/retrievePageAssetsProd.js'
+import type { RuntimeEnv } from './getConfigValueSourcesRelevant.js'
 import '../../assertEnvVite.js'
 
 async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise<string> {
@@ -24,7 +25,11 @@ async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise
     assert(result.isForClientSide === isForClientSide)
   }
   */
-  const { pageId, isForClientSide } = result
+  const { pageId, environmentName, isForClientSide } = result
+  const runtimeEnv: RuntimeEnv =
+    environmentName === 'client' || environmentName === 'server'
+      ? { isForClientSide, isClientRouting: false, isDev }
+      : { environmentName, isDev }
   const vikeConfig = await getVikeConfigInternal(true)
   const { _pageConfigs: pageConfigs } = vikeConfig
   const pageConfig = pageConfigs.find((pageConfig) => pageConfig.pageId === pageId)
@@ -38,20 +43,14 @@ async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise
     }
   }
 
-  const code = getCode(
-    pageConfig,
-    isForClientSide,
-    pageId,
-    resolveIncludeAssetsImportedByServer(vikeConfig.config),
-    isDev,
-  )
-  debug(id, isForClientSide ? 'CLIENT-SIDE' : 'SERVER-SIDE', code)
+  const code = getCode(pageConfig, runtimeEnv, pageId, resolveIncludeAssetsImportedByServer(vikeConfig.config), isDev)
+  debug(id, environmentName.toUpperCase(), code)
   return code
 }
 
 function getCode(
   pageConfig: PageConfigBuildTime,
-  isForClientSide: boolean,
+  runtimeEnv: RuntimeEnv,
   pageId: string,
   includeAssetsImportedByServer: boolean,
   isDev: boolean,
@@ -60,21 +59,19 @@ function getCode(
   const importStatements: string[] = []
   const filesEnv: FilesEnv = new Map()
   const isClientRouting = getConfigValueBuildTime(pageConfig, 'clientRouting', 'boolean')?.value ?? false
+  if ('isForClientSide' in runtimeEnv) runtimeEnv.isClientRouting = isClientRouting
 
   lines.push('export const configValuesSerialized = {')
-  lines.push(
-    ...serializeConfigValues(
-      pageConfig,
-      importStatements,
-      filesEnv,
-      { isForClientSide, isClientRouting, isDev },
-      '',
-      false,
-    ),
-  )
+  lines.push(...serializeConfigValues(pageConfig, importStatements, filesEnv, runtimeEnv, '', false))
   lines.push('};')
 
-  if (!handleAssetsManifest_isFixEnabled() && includeAssetsImportedByServer && isForClientSide && !isDev) {
+  if (
+    !handleAssetsManifest_isFixEnabled() &&
+    includeAssetsImportedByServer &&
+    'isForClientSide' in runtimeEnv &&
+    runtimeEnv.isForClientSide &&
+    !isDev
+  ) {
     importStatements.push(
       `import '${extractAssetsAddQuery(generateVirtualFileId({ type: 'page-entry', pageId, isForClientSide: false }))}'`,
     )

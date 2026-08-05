@@ -125,7 +125,7 @@ export const pageFilesExportNamesEager = {};
 export const pageFilesList = [];
 export const neverLoaded = {};
 
-${await generateVirtualFileGlobalEntry(isForClientSide, isDev, id, isClientRouting)}
+${await generateVirtualFileGlobalEntry({ isForClientSide, isClientRouting, isDev }, isDev, id)}
 
 `
 

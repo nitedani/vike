@@ -37,54 +37,81 @@ const virtualFileIdPageEntryPrefix =
 const virtualFileIdGlobalEntryPrefix =
   //
   'virtual:vike:global-entry:'
+const virtualFileIdRuntimePrefix =
+  //
+  'virtual:vike:runtime:'
 
 type VirtualFileIdEntryParsed =
-  | { type: 'global-entry'; isForClientSide: boolean; isClientRouting: boolean }
-  | { type: 'page-entry'; isForClientSide: boolean; pageId: string; isExtractAssets: boolean }
+  | {
+      type: 'global-entry'
+      environmentName: string
+      isForClientSide: boolean
+      isClientRouting: boolean
+    }
+  | { type: 'runtime'; environmentName: string }
+  | {
+      type: 'page-entry'
+      environmentName: string
+      isForClientSide: boolean
+      pageId: string
+      isExtractAssets: boolean
+    }
 
 function parseVirtualFileId(id: string): false | VirtualFileIdEntryParsed {
   id = removeVirtualFileIdPrefix(id)
-  if (!id.startsWith(virtualFileIdGlobalEntryPrefix) && !id.startsWith(virtualFileIdPageEntryPrefix)) return false
+  if (
+    !id.startsWith(virtualFileIdGlobalEntryPrefix) &&
+    !id.startsWith(virtualFileIdPageEntryPrefix) &&
+    !id.startsWith(virtualFileIdRuntimePrefix)
+  )
+    return false
+
+  // Environment-local public runtime API
+  if (id.startsWith(virtualFileIdRuntimePrefix)) {
+    const environmentName = id.slice(virtualFileIdRuntimePrefix.length)
+    assert(environmentName && !environmentName.includes(':'))
+    return { type: 'runtime', environmentName }
+  }
 
   // Global entry
-  if (id.includes(virtualFileIdGlobalEntryPrefix)) {
-    const isForClientSide = id !== virtualFileIdGlobalEntryServer
+  if (id.startsWith(virtualFileIdGlobalEntryPrefix)) {
     const isClientRouting = id === virtualFileIdGlobalEntryClientCR
+    const environmentName = (() => {
+      if (id === virtualFileIdGlobalEntryServer) return 'server'
+      if (id === virtualFileIdGlobalEntryClientSR || id === virtualFileIdGlobalEntryClientCR) return 'client'
+      const environmentName = id.slice(virtualFileIdGlobalEntryPrefix.length)
+      assert(environmentName && !environmentName.includes(':'))
+      return environmentName
+    })()
+    const isForClientSide = environmentName === 'client'
     return {
       type: 'global-entry',
+      environmentName,
       isForClientSide,
       isClientRouting,
     }
   }
 
   // Page entry
-  if (id.includes(virtualFileIdPageEntryPrefix)) {
+  if (id.startsWith(virtualFileIdPageEntryPrefix)) {
     const idOriginal = id
     id = extractAssetsRemoveQuery(id)
     const isExtractAssets = idOriginal !== id
-
-    if (id.startsWith(virtualFileIdPageEntryClient)) {
-      assert(isExtractAssets === false)
-      const pageIdSerialized = id.slice(virtualFileIdPageEntryClient.length)
-      const pageId = deserializePageId(pageIdSerialized)
-      return {
-        type: 'page-entry',
-        pageId,
-        isForClientSide: true,
-        isExtractAssets,
-      }
+    const environmentNameBegin = virtualFileIdPageEntryPrefix.length
+    const environmentNameEnd = id.indexOf(':', environmentNameBegin)
+    assert(environmentNameEnd > environmentNameBegin)
+    const environmentName = id.slice(environmentNameBegin, environmentNameEnd)
+    const pageIdSerialized = id.slice(environmentNameEnd + 1)
+    const pageId = deserializePageId(pageIdSerialized)
+    const isForClientSide = environmentName === 'client'
+    if (isForClientSide) assert(isExtractAssets === false)
+    return {
+      type: 'page-entry',
+      environmentName,
+      pageId,
+      isForClientSide,
+      isExtractAssets,
     }
-    if (id.startsWith(virtualFileIdPageEntryServer)) {
-      const pageIdSerialized = id.slice(virtualFileIdPageEntryServer.length)
-      const pageId = deserializePageId(pageIdSerialized)
-      return {
-        type: 'page-entry',
-        pageId,
-        isForClientSide: false,
-        isExtractAssets,
-      }
-    }
-    assert(false)
   }
 
   return false
@@ -93,9 +120,20 @@ function parseVirtualFileId(id: string): false | VirtualFileIdEntryParsed {
 function generateVirtualFileId(
   args:
     | { type: 'global-entry'; isForClientSide: boolean; isClientRouting: boolean }
-    | { type: 'page-entry'; pageId: string; isForClientSide: boolean },
+    | { type: 'global-entry'; environmentName: string }
+    | { type: 'page-entry'; pageId: string; isForClientSide: boolean }
+    | { type: 'page-entry'; pageId: string; environmentName: string }
+    | { type: 'runtime'; environmentName: string },
 ): string {
+  if (args.type === 'runtime') {
+    assert(args.environmentName && !args.environmentName.includes(':'))
+    return `${virtualFileIdRuntimePrefix}${args.environmentName}`
+  }
   if (args.type === 'global-entry') {
+    if ('environmentName' in args) {
+      assert(args.environmentName && !args.environmentName.includes(':'))
+      return `${virtualFileIdGlobalEntryPrefix}${args.environmentName}`
+    }
     const { isForClientSide, isClientRouting } = args
     if (!isForClientSide) {
       return virtualFileIdGlobalEntryServer
@@ -106,10 +144,15 @@ function generateVirtualFileId(
     }
   }
   if (args.type === 'page-entry') {
-    const { pageId, isForClientSide } = args
+    const { pageId } = args
     const pageIdSerialized = serializePageId(pageId)
-    const id =
-      `${isForClientSide ? virtualFileIdPageEntryClient : virtualFileIdPageEntryServer}${pageIdSerialized}` as const
+    if (!('environmentName' in args)) {
+      const prefix = args.isForClientSide ? virtualFileIdPageEntryClient : virtualFileIdPageEntryServer
+      return `${prefix}${pageIdSerialized}`
+    }
+    const { environmentName } = args
+    assert(environmentName && !environmentName.includes(':'))
+    const id = `${virtualFileIdPageEntryPrefix}${environmentName}:${pageIdSerialized}` as const
     return id
   }
   assert(false)

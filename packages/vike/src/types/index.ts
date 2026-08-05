@@ -23,6 +23,7 @@ export type {
   Config,
   ConfigMeta as Meta,
   KeepScrollPosition,
+  RuntimeEnvironmentDeclaration,
 } from './Config.js'
 
 export type { ImportString } from '../node/vite/shared/importString.js'
@@ -94,6 +95,18 @@ type Effect = ConfigEffect
 export type { Effect }
 
 export type { EarlyHint } from '../server/runtime/renderPageServer/getEarlyHints.js'
+
+export type {
+  RenderTarget,
+  RenderTargetPageConfigRef,
+  RenderTargetRequestMeta,
+  RenderTargetRequestAccess,
+  RenderTargetRequestBodyAccess,
+  RenderOutcome,
+  ResponseIntent,
+  ResponseArtifact,
+  ResponseArtifactBody,
+} from './RenderTarget.js'
 
 // TO-DO/next-major-release: remove
 // Ancient Vike versions used to have `import type { PageContextBuiltInClient } from 'vike/types'`

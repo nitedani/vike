@@ -104,6 +104,8 @@ type ConfigEnv = (
   server?: boolean
   /** Load value for config files */
   config?: boolean
+  /** Load value in one or more named runtime environments. */
+  runtimes?: string | string[]
   /** Load value only in production (`true`), or only in development (`false`), or always (`undefined`). */
   production?: boolean
 }

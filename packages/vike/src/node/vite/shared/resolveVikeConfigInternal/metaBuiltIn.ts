@@ -217,6 +217,11 @@ const metaBuiltIn: ConfigDefinitionsBuiltIn = {
     global: true,
     cumulative: true,
   },
+  runtimeEnvironments: {
+    env: { config: true, server: true },
+    global: true,
+    vite: true,
+  },
   meta: {
     env: { config: true },
   },
@@ -352,6 +357,12 @@ const metaBuiltIn: ConfigDefinitionsBuiltIn = {
     env: { client: true },
   },
   middleware: {
+    env: { server: true },
+    cumulative: true,
+    eager: true,
+    global: true,
+  },
+  renderTargets: {
     env: { server: true },
     cumulative: true,
     eager: true,

@@ -11,6 +11,7 @@ export type { HookNameGlobal }
 export type { Route }
 export type { KeepScrollPosition }
 export type { Vercel }
+export type { RuntimeEnvironmentDeclaration }
 
 // TO-DO/next-major-release: remove
 export type { DataAsync }
@@ -57,6 +58,7 @@ import type { StaticReplace } from '../node/vite/plugins/pluginStaticReplace/app
 import type { ImportStringList } from '../node/vite/shared/importString.js'
 import type { HookPublic } from '../shared-server-client/hooks/execHook.js'
 import type { EnhancedMiddleware } from '@universal-middleware/core'
+import type { RenderTarget } from './RenderTarget.js'
 
 type HookNameOld = HookName | HookNameOldDesign
 type HookName = HookNamePage | HookNameGlobal
@@ -111,6 +113,8 @@ type ConfigNameBuiltInGlobal =
   | 'redirects'
   | 'trailingSlash'
   | 'disableUrlNormalization'
+  | 'renderTargets'
+  | 'runtimeEnvironments'
   | 'vite'
 
 type Config = ConfigBuiltIn & Vike.Config
@@ -494,6 +498,9 @@ type ConfigBuiltIn = {
    */
   vite?: InlineConfig | (() => InlineConfig | Promise<InlineConfig>)
 
+  /** Named runtime environments whose Vite graphs are configured by an integration. */
+  runtimeEnvironments?: RuntimeEnvironmentDeclaration[]
+
   /** Permanent redirections (HTTP status code 301)
    *
    * https://vike.dev/redirects
@@ -666,6 +673,13 @@ type ConfigBuiltIn = {
   middleware?: EnhancedMiddleware | EnhancedMiddleware[]
 
   /**
+   * Register representation adapters for non-HTML responses.
+   *
+   * @experimental
+   */
+  renderTargets?: RenderTarget | RenderTarget[] | ImportStringList
+
+  /**
    * Set to `false` to disable Vike's automatic server integration mechanism (e.g. for integrating a JavaScript server manually via `renderPage()`).
    *
    * Set to `true` to use Vike's built-in server (no need to define `+server.js`).
@@ -709,6 +723,11 @@ type ConfigBuiltIn = {
    * https://vike.dev/vercel
    */
   vercel?: Vercel
+}
+
+type RuntimeEnvironmentDeclaration = {
+  name: string
+  assets: { role: 'browser-producer' } | { role: 'consumer-finalizer'; target: string } | { role: 'renderer-private' }
 }
 
 type Vercel = {
@@ -807,6 +826,7 @@ type ConfigBuiltInResolved = {
   redirects?: Record<string, string>[]
   prerender?: Exclude<Config['prerender'], ImportStringList | undefined>[]
   middleware?: (EnhancedMiddleware | EnhancedMiddleware[])[]
+  renderTargets?: (RenderTarget | RenderTarget[])[]
   headersResponse?: Exclude<Config['headersResponse'], ImportStringList | undefined>[]
   staticReplace?: StaticReplace[][]
 }
