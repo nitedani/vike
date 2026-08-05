@@ -44,10 +44,10 @@ type RenderTargetPageConfigRef = {
   renderRuntime: string
 }
 
-type RenderOutcome =
+type RenderOutcome<TRenderResult = unknown> =
   | {
       type: 'rendered'
-      value: unknown
+      value: TRenderResult
     }
   | {
       type: 'redirect'
@@ -63,6 +63,10 @@ type RenderOutcome =
 /** Vike's response intent. Core-owned headers are merged after `encodeOutcome()` returns. */
 type ResponseIntent = {
   statusCode: number
+  /**
+   * Repeated entries are preserved. Extracting repeated `Set-Cookie` values from Vike's core `Headers` assumes
+   * that the server runtime implements `Headers.getSetCookie()`, as supported Vike server runtimes do.
+   */
   headers: readonly (readonly [string, string])[]
   isPrerendering: boolean
 }
@@ -85,7 +89,7 @@ type ResponseArtifact = {
 }
 
 /** A representation adapter registered with `renderTargets`. */
-type RenderTarget = {
+type RenderTarget<TRequestData = unknown, TRenderResult = unknown> = {
   name: string
   /** Lifecycle hooks currently always execute in Vike's SSR runtime. */
   lifecycleRuntime: 'ssr'
@@ -93,15 +97,15 @@ type RenderTarget = {
   renderRuntime: 'ssr' | (string & {})
   /** Body access is deliberately absent: matching must not consume the request body. */
   match(requestMeta: RenderTargetRequestMeta): MaybePromise<boolean>
-  /** Called once, after this target is selected. */
-  prepareRequest?(requestAccess: RenderTargetRequestAccess): MaybePromise<unknown>
+  /** Called once, after this target is selected. When omitted, `requestData` is `undefined`. */
+  prepareRequest?(requestAccess: RenderTargetRequestAccess): MaybePromise<TRequestData>
   render(
     pageContext: PageContextServer,
     pageConfigRef: RenderTargetPageConfigRef,
-    requestData: unknown,
-  ): MaybePromise<unknown>
+    requestData: TRequestData,
+  ): MaybePromise<TRenderResult>
   /** Called for every terminal pre-commit outcome, including redirects and fallbacks. */
-  encodeOutcome(outcome: RenderOutcome, responseIntent: ResponseIntent): MaybePromise<ResponseArtifact>
+  encodeOutcome(outcome: RenderOutcome<TRenderResult>, responseIntent: ResponseIntent): MaybePromise<ResponseArtifact>
   prerender?:
     | false
     | {
