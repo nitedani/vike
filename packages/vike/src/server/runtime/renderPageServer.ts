@@ -86,6 +86,12 @@ import {
   type UniversalHandler,
 } from '@universal-middleware/core'
 import { createRequestAdapter } from '@universal-middleware/node/request'
+import {
+  createHttpResponseRenderTarget,
+  prepareRenderTarget,
+  resolveRenderTarget,
+  type PageContextRenderTarget,
+} from './renderPageServer/renderTarget.js'
 
 const globalObject = getGlobalObject('runtime/renderPageServer.ts', {
   httpRequestsCount: 0,
@@ -186,6 +192,21 @@ async function renderPageServerEntryOnce(
   globalContext: GlobalContextServerInternal,
   requestId: number,
 ) {
+  const request = getRequestWeb(pageContextBegin)
+  try {
+    const runtimeEnvironmentNames = (
+      (globalContext.config as { runtimeEnvironments?: { name: string }[] }).runtimeEnvironments ?? []
+    ).map(({ name }) => name)
+    updateType(
+      pageContextBegin,
+      await resolveRenderTarget(pageContextBegin, globalContext.config.renderTargets, runtimeEnvironmentNames, request),
+    )
+    await prepareRenderTarget(pageContextBegin, request)
+  } catch (err) {
+    logRuntimeError(err, pageContextBegin)
+    return await getPageContextHttpErrorFallback(err, pageContextBegin)
+  }
+
   // Check Base URL
   {
     const pageContextHttpResponse = await checkBaseUrl(pageContextBegin, globalContext)
@@ -254,7 +275,7 @@ async function renderPageServerEntryRecursive(
     )
     if (!errorPageId) {
       assert(hasProp(pageContextNominalPageBegin, 'pageId', 'null')) // Help TS
-      return handleErrorWithoutErrorPage(pageContextNominalPageBegin)
+      return await handleErrorWithoutErrorPage(pageContextNominalPageBegin)
     }
     objectAssign(pageContextNominalPageBegin, { pageId: errorPageId })
   }
@@ -321,7 +342,7 @@ async function renderPageServerEntryRecursive_onError(
     const errorPageId = getErrorPageId(globalContext._pageFilesAll, globalContext._pageConfigs)
     if (!errorPageId) {
       objectAssign(pageContextErrorPageInit, { pageId: null })
-      return handleErrorWithoutErrorPage(pageContextErrorPageInit)
+      return await handleErrorWithoutErrorPage(pageContextErrorPageInit)
     }
     objectAssign(pageContextErrorPageInit, { pageId: errorPageId })
   }
@@ -354,14 +375,14 @@ async function renderPageServerEntryRecursive_onError(
           )} doesn't occur while the error page is being rendered.`,
           { onlyOnce: false },
         )
-        const pageContextHttpErrorFallback = getPageContextHttpErrorFallback(err, pageContextBegin)
+        const pageContextHttpErrorFallback = await getPageContextHttpErrorFallback(err, pageContextBegin)
         return pageContextHttpErrorFallback
       }
     }
     if (!isSameErrorMessage(errErrorPage, err)) {
       logRuntimeError(errErrorPage, pageContextErrorPageInit)
     }
-    const pageContextHttpErrorFallback = getPageContextHttpErrorFallback(err, pageContextBegin)
+    const pageContextHttpErrorFallback = await getPageContextHttpErrorFallback(err, pageContextBegin)
     return pageContextHttpErrorFallback
   }
   return pageContextErrorPage
@@ -401,12 +422,10 @@ async function renderPageServerEntryWithMiddlewares(
   const handler = router[universalSymbol] as UniversalHandler
 
   const request =
-    pageContext._reqWeb ??
-    (pageContext._nodeDev
-      ? requestAdapter(pageContext._nodeDev.req, pageContext._nodeDev.res)
-      : new Request(new URL(pageContext.urlOriginal, 'http://localhost').toString(), {
-          headers: pageContext.headers ?? {},
-        }))
+    getRequestWeb(pageContext) ??
+    new Request(new URL(pageContext.urlOriginal, 'http://localhost').toString(), {
+      headers: pageContext.headers ?? {},
+    })
 
   const res = await handler(request, {}, getAdapterRuntime('other', { params: undefined }))
 
@@ -480,9 +499,11 @@ function prettyUrl(url: string) {
   return pc.bold(url)
 }
 
-function getPageContextHttpErrorFallback(err: unknown, pageContextBegin: PageContextBegin) {
+async function getPageContextHttpErrorFallback(err: unknown, pageContextBegin: PageContextBegin) {
   const pageContextHttpErrorFallback = fork(pageContextBegin)
-  const httpResponse = createHttpResponseErrorFallback(pageContextBegin)
+  const httpResponse = pageContextBegin._renderTarget
+    ? await createHttpResponseRenderTarget(pageContextBegin, { type: 'fallback', reason: 'error', error: err }, 500)
+    : createHttpResponseErrorFallback(pageContextBegin)
   objectAssign(pageContextHttpErrorFallback, {
     httpResponse,
     errorWhileRendering: err,
@@ -522,6 +543,8 @@ function getPageContextBegin(
     _requestId: requestId,
     _asyncStore: asyncStore,
     _isPageContextJsonRequest,
+    _renderTarget: null,
+    _renderTargetRequestData: undefined,
     // This array is shared between all pageContext objects, i.e. the following is true for any `i` and `j` index:
     // ```js
     // const pageContextsAborted_i = pageContextsAborted[i].pageContextsAborted
@@ -582,7 +605,7 @@ async function normalizeUrl(pageContextBegin: PageContextBegin, globalContext: G
     pageContext,
     'info',
   )
-  const httpResponse = createHttpResponseRedirect({ url: urlNormalized, statusCode: 301 }, pageContext)
+  const httpResponse = await createHttpResponseRedirectForPageContext(pageContext, urlNormalized, 301)
   objectAssign(pageContext, { httpResponse })
   return pageContext
 }
@@ -625,7 +648,7 @@ async function getPermanentRedirect(pageContextBegin: PageContextBegin, globalCo
     pageContext,
     'info',
   )
-  const httpResponse = createHttpResponseRedirect({ url: urlTarget, statusCode: 301 }, pageContext)
+  const httpResponse = await createHttpResponseRedirectForPageContext(pageContext, urlTarget, 301)
   objectAssign(pageContext, { httpResponse })
   return pageContext
 }
@@ -688,7 +711,8 @@ async function handleAbort(
 
   // URL Redirection — `throw redirect()`
   if (pageContextAbort._urlRedirect) {
-    const httpResponse = createHttpResponseRedirect(pageContextAbort._urlRedirect, pageContextBegin)
+    const { url, statusCode } = pageContextAbort._urlRedirect
+    const httpResponse = await createHttpResponseRedirectForPageContext(pageContextNominalPageBegin, url, statusCode)
     objectAssign(pageContext, { httpResponse })
     return { pageContextReturn: pageContext }
   }
@@ -704,7 +728,9 @@ async function checkBaseUrl(pageContextBegin: PageContextBegin, globalContext: G
   const { urlOriginal } = pageContext
   const { isBaseMissing } = parseUrl(urlOriginal, baseServer)
   if (!isBaseMissing) return
-  const httpResponse = createHttpResponseBaseIsMissing(urlOriginal, baseServer)
+  const httpResponse = pageContext._renderTarget
+    ? await createHttpResponseRenderTarget(pageContext, { type: 'fallback', reason: 'base-missing', error: null }, 500)
+    : createHttpResponseBaseIsMissing(urlOriginal, baseServer)
   objectAssign(pageContext, {
     httpResponse,
     isBaseMissing: true as const,
@@ -745,6 +771,25 @@ function fork<PageContext extends PageContextBegin>(pageContext: PageContext) {
   if (pageContext._asyncStore) pageContext._asyncStore.pageContext = pageContextNew
   assert(pageContextNew._asyncStore === pageContext._asyncStore)
   return pageContextNew
+}
+
+function getRequestWeb(pageContext: PageContextBegin): Request | null {
+  return (
+    pageContext.request ??
+    pageContext._reqWeb ??
+    (pageContext._nodeDev ? requestAdapter(pageContext._nodeDev.req, pageContext._nodeDev.res) : null)
+  )
+}
+
+async function createHttpResponseRedirectForPageContext(
+  pageContext: PageContextBegin & PageContextRenderTarget,
+  url: string,
+  statusCode: Parameters<typeof createHttpResponseRedirect>[0]['statusCode'],
+) {
+  if (pageContext._renderTarget) {
+    return await createHttpResponseRenderTarget(pageContext, { type: 'redirect', url, statusCode }, statusCode)
+  }
+  return createHttpResponseRedirect({ url, statusCode }, pageContext)
 }
 
 function assertPageContextFinish(pageContextFinish: PageContextAfterRender) {

@@ -65,12 +65,16 @@ import fs from 'node:fs'
 import { getPublicProxy } from '../../shared-server-client/getPublicProxy.js'
 import { getStaticRedirectsForPrerender } from '../../server/runtime/renderPageServer/resolveRedirects.js'
 import { updateType } from '../../utils/updateType.js'
+import type { RenderTarget } from '../../types/RenderTarget.js'
+import { prepareRenderTarget, resolveRenderTarget } from '../../server/runtime/renderPageServer/renderTarget.js'
 const docLink = 'https://vike.dev/i18n#pre-rendering'
 
 type HtmlFile = {
   pageContext: PageContextPrerendered
-  htmlString: string
+  htmlString: string | Uint8Array
   pageContextSerialized: string | null
+  renderTarget: RenderTarget | null
+  contentType: string | undefined
 }
 
 type DoNotPrerenderList = { pageId: string }[]
@@ -112,10 +116,10 @@ type PrerenderContext = {
 type Output<PageContext = PageContextPrerendered> = {
   filePath: string
   fileType: FileType
-  fileContent: string
+  fileContent: string | Uint8Array
   pageContext: PageContext
 }[]
-type FileType = 'HTML' | 'JSON'
+type FileType = 'HTML' | 'JSON' | 'ARTIFACT'
 
 type PageContext = Awaited<ReturnType<typeof createPageContextPrerendering>> & {
   _urlOriginalBeforeHook?: string
@@ -232,9 +236,11 @@ async function runPrerender(options: PrerenderOptions = {}, trigger: PrerenderTr
   await callOnPrerenderStartHook(prerenderContext, globalContext, concurrencyLimit)
 
   let prerenderedCount = 0
+  let prerenderedArtifactCount = 0
   // Write files as soon as pages finish rendering (instead of writing all files at once only after all pages have rendered).
   const onComplete = async (htmlFile: HtmlFile) => {
     prerenderedCount++
+    if (htmlFile.renderTarget) prerenderedArtifactCount++
     const { pageId } = htmlFile.pageContext
     assert((typeof pageId === 'string' && pageId) || pageId === null)
     if (pageId) {
@@ -252,7 +258,13 @@ async function runPrerender(options: PrerenderOptions = {}, trigger: PrerenderTr
   }
 
   if (logLevel === 'info') {
-    console.log(`${pc.green(`✓`)} ${prerenderedCount} HTML documents pre-rendered.`)
+    if (prerenderedArtifactCount === 0) {
+      console.log(`${pc.green(`✓`)} ${prerenderedCount} HTML documents pre-rendered.`)
+    } else {
+      console.log(
+        `${pc.green(`✓`)} ${prerenderedCount} pages pre-rendered (${prerenderedArtifactCount} non-HTML artifacts).`,
+      )
+    }
   }
 
   await warnMissingPages(prerenderContext._prerenderedPageContexts, globalContext, doNotPrerenderList, partial)
@@ -570,6 +582,17 @@ async function createPageContextPrerendering(
     is404,
   })
 
+  updateType(
+    pageContext,
+    await resolveRenderTarget(
+      pageContext,
+      globalContext.config.renderTargets,
+      (globalContext.config.runtimeEnvironments ?? []).map(({ name }) => name),
+      null,
+    ),
+  )
+  await prepareRenderTarget(pageContext, null)
+
   if (!is404) {
     const pageContextFromRoute = await route(pageContext)
     assert(hasProp(pageContextFromRoute, 'pageId', 'null') || hasProp(pageContextFromRoute, 'pageId', 'string')) // Help TS
@@ -860,12 +883,14 @@ async function prerenderPages(
           assertIsNotAbort(err, pc.cyan(pageContextBeforeRender.urlOriginal))
           throw err
         }
-        const { documentHtml, pageContext } = res
+        const { documentHtml, pageContext, renderTarget, contentType } = res
         const pageContextSerialized = pageContext.is404 ? null : res.pageContextSerialized
         await onComplete({
           pageContext,
           htmlString: documentHtml,
           pageContextSerialized,
+          renderTarget,
+          contentType,
         })
       }),
     ),
@@ -916,11 +941,21 @@ async function warnMissingPages(
 }
 
 async function writeFiles(
-  { pageContext, htmlString, pageContextSerialized }: HtmlFile,
+  { pageContext, htmlString, pageContextSerialized, renderTarget, contentType }: HtmlFile,
   prerenderContext: PrerenderContext,
   onPagePrerender: Function | undefined,
   logLevel: 'warn' | 'info',
 ) {
+  if (renderTarget) {
+    assert(pageContextSerialized === null)
+    assert(typeof renderTarget.prerender === 'object')
+    const fileUrl = renderTarget.prerender.filePath({ urlOriginal: pageContext.urlOriginal, contentType })
+    validateArtifactFileUrl(fileUrl, renderTarget.name)
+    await write(pageContext, 'ARTIFACT', htmlString, onPagePrerender, prerenderContext, logLevel, fileUrl)
+    return
+  }
+
+  assert(typeof htmlString === 'string')
   const writeJobs = [write(pageContext, 'HTML', htmlString, onPagePrerender, prerenderContext, logLevel)]
   if (pageContextSerialized !== null) {
     writeJobs.push(write(pageContext, 'JSON', pageContextSerialized, onPagePrerender, prerenderContext, logLevel))
@@ -931,16 +966,20 @@ async function writeFiles(
 async function write(
   pageContext: PageContextPrerendered,
   fileType: FileType,
-  fileContent: string,
+  fileContent: string | Uint8Array,
   onPagePrerender: Function | undefined,
   prerenderContext: PrerenderContext,
   logLevel: 'info' | 'warn',
+  fileUrlOverride?: string,
 ) {
   const { urlOriginal } = pageContext
   assert(urlOriginal.startsWith('/'))
 
   let fileUrl: string
-  if (fileType === 'HTML') {
+  if (fileType === 'ARTIFACT') {
+    assert(fileUrlOverride)
+    fileUrl = fileUrlOverride
+  } else if (fileType === 'HTML') {
     const doNotCreateExtraDirectory = prerenderContext._noExtraDir ?? pageContext.is404
     fileUrl = urlToFile(urlOriginal, '.html', doNotCreateExtraDirectory)
   } else {
@@ -992,6 +1031,19 @@ async function write(
       console.log(`${pc.dim(outDirClientRelative)}${pc.blue(filePathRelative)}`)
     }
   }
+}
+
+function validateArtifactFileUrl(fileUrl: string, renderTargetName: string): void {
+  const label = `render target ${JSON.stringify(renderTargetName)} prerender.filePath()`
+  assertUsage(typeof fileUrl === 'string' && fileUrl.length > 1, `${label} should return an absolute file path`)
+  assertUsage(fileUrl.startsWith('/'), `${label} should return a path starting with /`)
+  assertUsage(!fileUrl.includes('\\') && !fileUrl.includes('\0'), `${label} should return a valid POSIX path`)
+  assertUsage(
+    !fileUrl.includes('?') && !fileUrl.includes('#'),
+    `${label} should return a file path without query or hash`,
+  )
+  assertUsage(!fileUrl.endsWith('/'), `${label} should return a file path, not a directory`)
+  assertUsage(path.posix.normalize(fileUrl) === fileUrl, `${label} should return a normalized path without traversal`)
 }
 
 function normalizeOnPrerenderHookResult(
@@ -1177,6 +1229,8 @@ async function prerenderRedirects(
       pageContext: { urlOriginal, pageId: null, is404: false, isRedirect: true },
       htmlString,
       pageContextSerialized: null,
+      renderTarget: null,
+      contentType: 'text/html;charset=utf-8',
     })
   }
 }

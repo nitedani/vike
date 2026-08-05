@@ -1,5 +1,6 @@
 export { resolveHeadersResponseEarly }
 export { resolveHeadersResponseFinal }
+export { headersToEntriesPreservingSetCookie }
 
 import { addCspResponseHeader, PageContextCspNonce } from './csp.js'
 import { isCallable } from '../../../utils/isCallable.js'
@@ -19,11 +20,7 @@ function resolveHeadersResponseFinal(
   // This overrides any previously set Cache-Control value.
   if (statusCode >= 500) headersResponse.set('Cache-Control', cacheControlDisable)
 
-  const headers: [string, string][] = []
-  headersResponse.forEach((value, key) => {
-    headers.push([key, value])
-  })
-  return headers
+  return headersToEntriesPreservingSetCookie(headersResponse)
 }
 
 async function resolveHeadersResponseEarly(pageContext: PageContextAfterPageEntryLoaded & PageContextCspNonce) {
@@ -50,11 +47,23 @@ async function resolveHeadersResponseConfig(pageContext: PageContextAfterPageEnt
         } else {
           headersInit = headers
         }
-        new Headers(headersInit).forEach((value, key) => {
+        headersToEntriesPreservingSetCookie(new Headers(headersInit)).forEach(([key, value]) => {
           headersMerged.append(key, value)
         })
       },
     ),
   )
   return headersMerged
+}
+
+function headersToEntriesPreservingSetCookie(headers: Headers): [string, string][] {
+  const entries: [string, string][] = []
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie
+  const setCookies = typeof getSetCookie === 'function' ? getSetCookie.call(headers) : null
+  headers.forEach((value, key) => {
+    if (setCookies && key.toLowerCase() === 'set-cookie') return
+    entries.push([key, value])
+  })
+  setCookies?.forEach((value) => entries.push(['set-cookie', value]))
+  return entries
 }

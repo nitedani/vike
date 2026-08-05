@@ -12,7 +12,12 @@ import { objectAssign } from '../../../utils/objectAssign.js'
 import { updateType } from '../../../utils/updateType.js'
 import { getPageContextClientSerialized } from './html/serializeContext.js'
 import { type PageContextUrlInternal } from '../../../shared-server-client/getPageContextUrlComputed.js'
-import { createHttpResponsePage, createHttpResponsePageJson, HttpResponse } from './createHttpResponse.js'
+import {
+  createHttpResponsePage,
+  createHttpResponsePageJson,
+  getStatusCodePage,
+  HttpResponse,
+} from './createHttpResponse.js'
 import {
   loadPageConfigsLazyServerSide,
   type PageContext_loadPageConfigsLazyServerSide,
@@ -28,6 +33,7 @@ import { isServerSideError } from '../../../shared-server-client/misc/isServerSi
 import type { PageContextCreatedServer } from './createPageContextServer.js'
 import type { PageContextBegin } from '../renderPageServer.js'
 import { getAsyncLocalStorage, type AsyncStore } from '../asyncHook.js'
+import { createHttpResponseRenderTarget, renderWithRenderTarget, type PageContextRenderTarget } from './renderTarget.js'
 import '../../assertEnvServer.js'
 
 type PageContextAfterRender = { httpResponse: HttpResponse; errorWhileRendering: null | Error }
@@ -85,6 +91,15 @@ async function renderPageServerAfterRoute<
     return pageContext
   }
 
+  if ((pageContext as typeof pageContext & PageContextRenderTarget)._renderTarget) {
+    const pageContextRenderTarget = pageContext as typeof pageContext & PageContextRenderTarget
+    const outcome = await renderWithRenderTarget(pageContextRenderTarget)
+    const statusCode = getStatusCodePage(pageContext)
+    const httpResponse = await createHttpResponseRenderTarget(pageContextRenderTarget, outcome, statusCode)
+    objectAssign(pageContext, { httpResponse })
+    return pageContext
+  }
+
   const renderHookResult = await execHookOnRenderHtml(pageContext)
 
   const { htmlRender, renderHook } = renderHookResult
@@ -130,6 +145,31 @@ async function prerenderPageEntry(
 
   await execHookDataAndOnBeforeRender(pageContext)
 
+  const pageContextRenderTarget = pageContext as typeof pageContext & PageContextRenderTarget
+  if (pageContextRenderTarget._renderTarget) {
+    const { _renderTarget: renderTarget } = pageContextRenderTarget
+    assertUsage(
+      typeof renderTarget.prerender === 'object',
+      `Cannot pre-render ${pc.cyan(pageContext.urlOriginal)} because render target ${pc.cyan(
+        renderTarget.name,
+      )} doesn't define prerender.filePath()`,
+    )
+    const outcome = await renderWithRenderTarget(pageContextRenderTarget)
+    const httpResponse = await createHttpResponseRenderTarget(
+      pageContextRenderTarget,
+      outcome,
+      pageContext.is404 ? 404 : 200,
+    )
+    const documentHtml = await httpResponse.getBody()
+    return {
+      documentHtml,
+      pageContextSerialized: null,
+      pageContext,
+      renderTarget,
+      contentType: httpResponse.headers.find(([name]) => name.toLowerCase() === 'content-type')?.[1],
+    }
+  }
+
   const { htmlRender, renderHook } = await execHookOnRenderHtml(pageContext)
   assertUsage(
     htmlRender !== null,
@@ -140,9 +180,11 @@ async function prerenderPageEntry(
   const documentHtml = await getHtmlString(htmlRender)
   assert(typeof documentHtml === 'string')
   if (!pageContext._usesClientRouter) {
-    return { documentHtml, pageContextSerialized: null, pageContext }
+    return { documentHtml, pageContextSerialized: null, pageContext, renderTarget: null, contentType: contentTypeHtml }
   } else {
     const pageContextSerialized = getPageContextClientSerialized(pageContext, false)
-    return { documentHtml, pageContextSerialized, pageContext }
+    return { documentHtml, pageContextSerialized, pageContext, renderTarget: null, contentType: contentTypeHtml }
   }
 }
+
+const contentTypeHtml = 'text/html;charset=utf-8'

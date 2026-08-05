@@ -7,10 +7,11 @@ import { createHttpResponseErrorFallback, createHttpResponseErrorFallbackJson } 
 import pc from '@brillout/picocolors'
 import type { GetPageAssets } from './getPageAssets.js'
 import type { PageContextCreatedServer } from './createPageContextServer.js'
+import { createHttpResponseRenderTarget, type PageContextRenderTarget } from './renderTarget.js'
 import '../../assertEnvServer.js'
 
 // When the user hasn't defined _error.page.js
-function handleErrorWithoutErrorPage<
+async function handleErrorWithoutErrorPage<
   PageContext extends PageContextCreatedServer & {
     errorWhileRendering: null | Error
     is404: null | boolean
@@ -28,7 +29,18 @@ function handleErrorWithoutErrorPage<
   }
 
   if (!pageContext.isClientSideNavigation) {
-    const httpResponse = createHttpResponseErrorFallback(pageContext)
+    const pageContextRenderTarget = pageContext as PageContext & PageContextRenderTarget
+    const httpResponse = pageContextRenderTarget._renderTarget
+      ? await createHttpResponseRenderTarget(
+          pageContextRenderTarget,
+          {
+            type: 'fallback',
+            reason: pageContext.is404 ? 'not-found' : 'error',
+            error: pageContext.errorWhileRendering,
+          },
+          pageContext.is404 ? 404 : 500,
+        )
+      : createHttpResponseErrorFallback(pageContext)
     objectAssign(pageContext, { httpResponse })
     return pageContext
   } else {

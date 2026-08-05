@@ -7,22 +7,31 @@ export { createHttpResponseRedirect }
 export { createHttpResponse404 }
 export { createHttpResponseBaseIsMissing }
 export { createHttpResponseFromUniversalMiddleware }
+export { createHttpResponseArtifact }
+export { getStatusCodePage }
 export type { HttpResponse }
 
 import type { GetPageAssets } from './getPageAssets.js'
 import { escapeHtml } from '../../../utils/escapeHtml.js'
-import { assert, assertWarning } from '../../../utils/assert.js'
+import { assert, assertUsage, assertWarning } from '../../../utils/assert.js'
 import type { HtmlRender } from './html/renderHtml.js'
 import { getErrorPageId, isErrorPage } from '../../../shared-server-client/error-page.js'
 import type { RenderHook } from './execHookOnRenderHtml.js'
 import type { RedirectStatusCode, AbortStatusCode, UrlRedirect } from '../../../shared-server-client/route/abort.js'
-import { getHttpResponseBody, getHttpResponseBodyStreamHandlers, HttpResponseBody } from './getHttpResponseBody.js'
+import {
+  getHttpResponseBody,
+  getHttpResponseBodyStreamHandlers,
+  HttpResponseBody,
+  type ResponseBody,
+} from './getHttpResponseBody.js'
 import { getEarlyHints, type EarlyHint } from './getEarlyHints.js'
 import { assertNoInfiniteHttpRedirect } from './createHttpResponse/assertNoInfiniteHttpRedirect.js'
 import type { PageContextBegin } from '../renderPageServer.js'
 import type { GlobalContextServerInternal } from '../globalContext.js'
-import { resolveHeadersResponseFinal } from './headersResponse.js'
+import { headersToEntriesPreservingSetCookie, resolveHeadersResponseFinal } from './headersResponse.js'
 import { stringify } from '@brillout/json-serializer/stringify'
+import { isStream, processStream } from './html/stream.js'
+import type { ResponseArtifact, ResponseIntent } from '../../../types/RenderTarget.js'
 import '../../assertEnvServer.js'
 
 type HttpResponse = {
@@ -55,6 +64,20 @@ async function createHttpResponsePage(
     headersResponse?: Headers
   },
 ): Promise<HttpResponse> {
+  const statusCode = getStatusCodePage(pageContext)
+
+  const earlyHints = getEarlyHints(await pageContext.__getPageAssets())
+  const headers = resolveHeadersResponseFinal(pageContext, statusCode)
+  return createHttpResponse(statusCode, contentTypeHtml, headers, htmlRender, earlyHints, renderHook)
+}
+
+function getStatusCodePage(pageContext: {
+  pageId: null | string
+  is404: null | boolean
+  errorWhileRendering: null | Error
+  _globalContext: GlobalContextServerInternal
+  abortStatusCode?: AbortStatusCode
+}): StatusCode {
   let statusCode: StatusCode | undefined = pageContext.abortStatusCode
   if (!statusCode) {
     const isError = !pageContext.pageId || isErrorPage(pageContext.pageId, pageContext._globalContext._pageConfigs)
@@ -69,10 +92,7 @@ async function createHttpResponsePage(
       statusCode = pageContext.is404 ? 404 : 500
     }
   }
-
-  const earlyHints = getEarlyHints(await pageContext.__getPageAssets())
-  const headers = resolveHeadersResponseFinal(pageContext, statusCode)
-  return createHttpResponse(statusCode, contentTypeHtml, headers, htmlRender, earlyHints, renderHook)
+  return statusCode
 }
 
 function createHttpResponse404(errMsg404: string): HttpResponse {
@@ -165,11 +185,30 @@ function createHttpResponseFromUniversalMiddleware(response: Response, earlyHint
   const body = response.body ?? getHtmlFallback('<p style="display: none">No HTTP response body.</p>')
   const httpResponse = createHttpResponseCommon(
     response.status,
-    Array.from(response.headers.entries()),
+    headersToEntriesPreservingSetCookie(response.headers),
     body,
     earlyHints,
   )
   return httpResponse
+}
+
+async function createHttpResponseArtifact(
+  artifact: ResponseArtifact,
+  responseIntent: ResponseIntent,
+): Promise<HttpResponse> {
+  assertResponseArtifact(artifact)
+
+  let body: ResponseBody = artifact.body
+  if (artifact.onErrorWhileStreaming && isStream(body)) {
+    body = await processStream(body, {
+      onErrorWhileStreaming: artifact.onErrorWhileStreaming,
+      // Once encodeOutcome() returns, Vike has no representation-neutral way to replace emitted bytes.
+      enableEagerStreaming: true,
+    })
+  }
+
+  const headers = mergeArtifactHeaders(artifact, responseIntent.headers)
+  return createHttpResponseCommon(artifact.statusCode, headers, body, [], null, 'artifact')
 }
 
 function getHtmlFallback(bodyHtml: string, logText: string = htmlFallbackLog): string {
@@ -193,9 +232,10 @@ function createHttpResponse(
 function createHttpResponseCommon(
   statusCode: number,
   headers: ResponseHeaders,
-  htmlRender: HtmlRender,
+  responseBody: ResponseBody,
   earlyHints: EarlyHint[] = [],
   renderHook: null | RenderHook = null,
+  bodyKind: 'html' | 'artifact' = 'html',
 ): HttpResponse {
   const contentType = headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1]
   return {
@@ -212,8 +252,94 @@ function createHttpResponseCommon(
     },
     earlyHints,
     get body() {
-      return getHttpResponseBody(htmlRender, renderHook)
+      return getHttpResponseBody(responseBody, renderHook)
     },
-    ...getHttpResponseBodyStreamHandlers(htmlRender, renderHook),
+    ...getHttpResponseBodyStreamHandlers(responseBody, renderHook, bodyKind),
   }
+}
+
+function assertResponseArtifact(artifact: ResponseArtifact): void {
+  assertUsage(artifact && typeof artifact === 'object', 'renderTarget.encodeOutcome() should return an object')
+  assertUsage(
+    Number.isInteger(artifact.statusCode) && artifact.statusCode >= 100 && artifact.statusCode <= 599,
+    'renderTarget.encodeOutcome() should return a statusCode between 100 and 599',
+  )
+  assertUsage(Array.isArray(artifact.headers), 'renderTarget.encodeOutcome() should return headers as an array')
+  artifact.headers.forEach(assertHeader)
+  assertUsage(
+    !artifact.headers.some(([name]) => name.toLowerCase() === 'content-type'),
+    'Content-Type is reserved to renderTarget.encodeOutcome().contentType: remove it from ResponseArtifact.headers',
+  )
+  if (artifact.contentType !== undefined) {
+    assertUsage(
+      typeof artifact.contentType === 'string' &&
+        artifact.contentType.length > 0 &&
+        !hasInvalidHeaderChars(artifact.contentType),
+      'renderTarget.encodeOutcome().contentType should be a non-empty HTTP header value',
+    )
+  }
+  assertUsage(
+    typeof artifact.body === 'string' || artifact.body instanceof Uint8Array || isStream(artifact.body),
+    'renderTarget.encodeOutcome().body should be a string, Uint8Array, Web ReadableStream, or Node.js Readable stream',
+  )
+  assertUsage(
+    artifact.onErrorWhileStreaming === undefined || typeof artifact.onErrorWhileStreaming === 'function',
+    'renderTarget.encodeOutcome().onErrorWhileStreaming should be a function',
+  )
+}
+
+function mergeArtifactHeaders(
+  artifact: ResponseArtifact,
+  responseIntentHeaders: ResponseIntent['headers'],
+): ResponseHeaders {
+  const headers: ResponseHeaders = []
+  const singleValueHeaders = new Set([
+    'content-encoding',
+    'content-length',
+    'content-range',
+    'location',
+    'transfer-encoding',
+  ])
+
+  artifact.headers.forEach(([name, value]) => add(name, value))
+  if (artifact.contentType) add('Content-Type', artifact.contentType)
+  responseIntentHeaders.forEach(([name, value]) => {
+    assertHeader([name, value])
+    assertUsage(
+      name.toLowerCase() !== 'content-type',
+      'Content-Type is reserved to the render target: remove Content-Type from headersResponse',
+    )
+    add(name, value)
+  })
+  return headers
+
+  function add(name: string, value: string) {
+    const nameLower = name.toLowerCase()
+    const existing = headers.filter(([existingName]) => existingName.toLowerCase() === nameLower)
+    if (singleValueHeaders.has(nameLower) && existing.length > 0) {
+      assertUsage(
+        existing.every(([, existingValue]) => existingValue === value),
+        `Conflicting ${name} response headers cannot be merged losslessly`,
+      )
+      return
+    }
+    headers.push([name, value])
+  }
+}
+
+function assertHeader(header: readonly [string, string]): void {
+  assertUsage(
+    Array.isArray(header) &&
+      header.length === 2 &&
+      typeof header[0] === 'string' &&
+      header[0].length > 0 &&
+      typeof header[1] === 'string' &&
+      !hasInvalidHeaderChars(header[0]) &&
+      !hasInvalidHeaderChars(header[1]),
+    'ResponseArtifact.headers should contain [name, value] string tuples without line breaks',
+  )
+}
+
+function hasInvalidHeaderChars(value: string): boolean {
+  return value.includes('\r') || value.includes('\n')
 }

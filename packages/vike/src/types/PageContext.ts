@@ -197,6 +197,11 @@ type PageContextInit = {
    * https://vike.dev/pageContext#headersOriginal
    */
   headersOriginal?: unknown // We set it to the type `unknown` instead of the type `HeadersInit` because `HeadersInit` isn't accurate: for example, `http.IncomingHttpHeaders` is a valid input for `new Headers()` but doesn't match the `HeadersInit` init.
+  /**
+   * The Fetch request. Render targets use it for one-shot body access after target selection.
+   * Custom `renderPage()` integrations should provide it when a target needs the request body.
+   */
+  request?: Request
   /** @deprecated Set `pageContextInit.urlOriginal` instead  */ // TO-DO/next-major-release: remove
   url?: string
 }

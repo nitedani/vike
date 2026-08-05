@@ -63,7 +63,13 @@ function addSsrMiddleware(
     }
 
     const { httpResponse } = pageContext
-    httpResponse.headers.forEach(([name, value]) => res.setHeader(name, value))
+    httpResponse.headers.forEach(([name, value]) => {
+      if (res.hasHeader(name)) {
+        res.appendHeader(name, value)
+      } else {
+        res.setHeader(name, value)
+      }
+    })
     res.statusCode = httpResponse.statusCode
     httpResponse.pipe(res)
   })
