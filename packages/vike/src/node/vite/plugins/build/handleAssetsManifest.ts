@@ -4,6 +4,7 @@ export { handleAssetsManifest_isFixEnabled }
 export { handleAssetsManifest_assertUsageCssCodeSplit }
 export { handleAssetsManifest_assertUsageCssTarget }
 export { handleAssetsManifest_alignCssTarget }
+export { addServerAssets, getPageEntry, resolveAssetParticipants }
 
 import fs from 'node:fs/promises'
 import fs_sync from 'node:fs'
@@ -30,6 +31,9 @@ import {
 } from '../../shared/isViteServerSide.js'
 import { set_macro_ASSETS_MANIFEST } from './pluginProdBuildEntry.js'
 import { getManifestFilePathRelative } from '../../shared/getManifestFilePathRelative.js'
+import { getVikeConfigInternal } from '../../shared/resolveVikeConfigInternal.js'
+import { toPosixPath } from '../../../../utils/path.js'
+import type { RuntimeEnvironmentDeclaration } from '../../../../types/Config.js'
 import '../../assertEnvVite.js'
 type Bundle = Rollup.OutputBundle
 
@@ -38,6 +42,35 @@ const globalObject = getGlobalObject('handleAssetsManifest.ts', {
   targetsAll: [] as TargetConfig[],
   configsAll: [] as ResolvedConfig[],
 })
+
+type AssetParticipant = {
+  environmentName: string
+  entryEnvironmentName: string
+  assets: RuntimeEnvironmentDeclaration['assets']
+}
+
+function resolveAssetParticipants(runtimeEnvironments: RuntimeEnvironmentDeclaration[] | undefined) {
+  if (!runtimeEnvironments?.length) return null
+  const participants = new Map<string, AssetParticipant>()
+  const add = (participant: AssetParticipant) => {
+    assert(!participants.has(participant.environmentName))
+    participants.set(participant.environmentName, participant)
+  }
+  add({ environmentName: 'client', entryEnvironmentName: 'client', assets: { role: 'browser-producer' } })
+  // Keep the existing `server` virtual ID byte-identical while the Vite environment is named `ssr`.
+  add({
+    environmentName: 'ssr',
+    entryEnvironmentName: 'server',
+    assets: { role: 'consumer-finalizer', target: 'client' },
+  })
+  runtimeEnvironments.forEach(({ name, assets }) => add({ environmentName: name, entryEnvironmentName: name, assets }))
+  return participants
+}
+
+async function getAssetParticipants() {
+  const vikeConfig = await getVikeConfigInternal()
+  return resolveAssetParticipants(vikeConfig.config.runtimeEnvironments)
+}
 
 // yes  => use workaround config.build.ssrEmitAssets
 // false => use workaround extractAssets plugin
@@ -63,72 +96,156 @@ async function fixServerAssets(
 }
 async function copyAssets(filesToMove: string[], filesToRemove: string[], config: ResolvedConfig) {
   const { outDirClient, outDirServer } = getOutDirs(config, undefined)
+  await copyParticipantAssets(filesToMove, filesToRemove, outDirServer, outDirClient, config)
+}
+
+async function copyParticipantAssets(
+  filesToMove: string[],
+  filesToRemove: string[],
+  sourceOutDir: string,
+  targetOutDir: string,
+  config: ResolvedConfig,
+) {
   const assetsDir = getAssetsDir(config)
-  const assetsDirServer = path.posix.join(outDirServer, assetsDir)
-  if (!filesToMove.length && !filesToRemove.length && !existsSync(assetsDirServer)) return
-  assert(existsSync(assetsDirServer))
+  const sourceAssetsDir = path.posix.join(sourceOutDir, assetsDir)
+  if (!filesToMove.length && !filesToRemove.length && !existsSync(sourceAssetsDir)) return
+  assert(existsSync(sourceAssetsDir))
   const concurrencyLimit = pLimit(10)
   await Promise.all(
     filesToMove.map((file) =>
       concurrencyLimit(async () => {
-        const source = path.posix.join(outDirServer, file)
-        const target = path.posix.join(outDirClient, file)
+        const source = path.posix.join(sourceOutDir, file)
+        const target = path.posix.join(targetOutDir, file)
         await fs.mkdir(path.posix.dirname(target), { recursive: true })
         await fs.rename(source, target)
       }),
     ),
   )
   filesToRemove.forEach((file) => {
-    const filePath = path.posix.join(outDirServer, file)
+    const filePath = path.posix.join(sourceOutDir, file)
     fs_sync.unlinkSync(filePath)
   })
   /* We cannot do that because, with some edge case Rollup settings (outputting JavaScript chunks and static assets to the same directory), this removes JavaScript chunks, see https://github.com/vikejs/vike/issues/1154#issuecomment-1975762404
   await fs.rm(assetsDirServer, { recursive: true })
   */
-  removeEmptyDirectories(assetsDirServer)
+  removeEmptyDirectories(sourceAssetsDir)
+}
+
+async function handleAssetParticipants(
+  config: ResolvedConfig,
+  viteEnv: Environment,
+  bundle: Bundle,
+  participants: Map<string, AssetParticipant>,
+) {
+  const environmentName = viteEnv.name
+  if (!environmentName) return
+  const finalizer = participants.get(environmentName)
+  if (!finalizer || finalizer.assets.role !== 'consumer-finalizer') return
+  const producer = participants.get(finalizer.assets.target)
+  assert(producer?.assets.role === 'browser-producer')
+
+  const producerManifestFilePath = getParticipantManifestFilePath(config, producer)
+  const finalizerManifestFilePath = getParticipantManifestFilePath(config, finalizer)
+  const assetsJsonFilePath = getParticipantAssetsJsonFilePath(config, producer)
+  // Another finalizer targeting the same producer may have already consumed its Vite manifest.
+  const producerManifest = await readManifestFileAt(
+    existsSync(producerManifestFilePath) ? producerManifestFilePath : assetsJsonFilePath,
+  )
+  const finalizerManifest = await readManifestFileAt(finalizerManifestFilePath)
+  const { filesToMove, filesToRemove } = addServerAssets(
+    producerManifest,
+    finalizerManifest,
+    { producer: producer.entryEnvironmentName, finalizer: finalizer.entryEnvironmentName },
+    true,
+  )
+  await copyParticipantAssets(
+    filesToMove,
+    filesToRemove,
+    getParticipantOutDir(config, finalizer),
+    getParticipantOutDir(config, producer),
+    config,
+  )
+  await writeManifestFile(producerManifest, assetsJsonFilePath)
+  const noop = await set_macro_ASSETS_MANIFEST(assetsJsonFilePath, bundle, getParticipantOutDir(config, finalizer))
+  if (finalizer.environmentName === 'ssr') assert(!noop)
+  await fs.rm(finalizerManifestFilePath)
+  if (existsSync(producerManifestFilePath)) await fs.rm(producerManifestFilePath)
+}
+
+function getParticipantOutDir(config: ResolvedConfig, participant: AssetParticipant) {
+  const environment = config.environments[participant.environmentName]
+  assert(environment)
+  const outDir = environment.build.outDir
+  assert(outDir)
+  return toPosixPath(path.resolve(config.root, outDir))
+}
+
+function getParticipantManifestFilePath(config: ResolvedConfig, participant: AssetParticipant) {
+  const environment = config.environments[participant.environmentName]
+  assert(environment)
+  return path.posix.join(
+    getParticipantOutDir(config, participant),
+    getManifestFilePathRelative(environment.build.manifest),
+  )
+}
+
+function getParticipantAssetsJsonFilePath(config: ResolvedConfig, producer: AssetParticipant) {
+  const fileName = producer.environmentName === 'client' ? 'assets.json' : `assets.${producer.environmentName}.json`
+  return path.posix.join(path.posix.dirname(getParticipantOutDir(config, producer)), fileName)
 }
 
 type Resource = { src: string; hash: string }
 // Add serverManifest resources to clientManifest
-function addServerAssets(clientManifest: ViteManifest, serverManifest: ViteManifest) {
+function addServerAssets(
+  clientManifest: ViteManifest,
+  serverManifest: ViteManifest,
+  environments = { producer: 'client', finalizer: 'server' },
+  mergeEntryCollisions = false,
+) {
   const entriesClient = new Map<
-    string, // pageId
+    string, // (environmentName, pageId)
     {
       key: string
+      pageId: string
       css: Resource[]
       assets: Resource[]
     }
   >()
   const entriesServer = new Map<
-    string, // pageId
+    string, // (environmentName, pageId)
     {
       key: string
+      pageId: string
       css: Resource[]
       assets: Resource[]
     }
   >()
 
   for (const [key, entry] of Object.entries(clientManifest)) {
-    const pageId = getPageId(key)
-    if (!pageId) continue
+    const pageEntry = getPageEntry(key)
+    if (!pageEntry || pageEntry.environmentName !== environments.producer) continue
     const resources = collectResources(entry, clientManifest)
-    assert(!entriesClient.has(pageId))
-    entriesClient.set(pageId, { key, ...resources })
+    const correlationKey = getPageCorrelationKey(pageEntry)
+    assert(!entriesClient.has(correlationKey))
+    entriesClient.set(correlationKey, { key, pageId: pageEntry.pageId, ...resources })
   }
   for (const [key, entry] of Object.entries(serverManifest)) {
-    const pageId = getPageId(key)
-    if (!pageId) continue
+    const pageEntry = getPageEntry(key)
+    if (!pageEntry || pageEntry.environmentName !== environments.finalizer) continue
     const resources = collectResources(entry, serverManifest)
-    assert(!entriesServer.has(pageId))
-    entriesServer.set(pageId, { key, ...resources })
+    const correlationKey = getPageCorrelationKey(pageEntry)
+    assert(!entriesServer.has(correlationKey))
+    entriesServer.set(correlationKey, { key, pageId: pageEntry.pageId, ...resources })
   }
 
   let filesToMove: string[] = []
   let filesToRemove: string[] = []
 
   // Copy page assets
-  for (const [pageId, entryClient] of entriesClient.entries()) {
-    const entryServer = entriesServer.get(pageId)
+  for (const entryClient of entriesClient.values()) {
+    const entryServer = entriesServer.get(
+      getPageCorrelationKey({ environmentName: environments.finalizer, pageId: entryClient.pageId }),
+    )
     if (!entryServer) continue
 
     const cssToMove: string[] = []
@@ -190,18 +307,26 @@ function addServerAssets(clientManifest: ViteManifest, serverManifest: ViteManif
     for (const key in serverManifest) {
       const entry = serverManifest[key]!
       if (!entry.isEntry) continue
+      const pageEntry = getPageEntry(key)
+      if (pageEntry && pageEntry.environmentName !== environments.finalizer) continue
       const resources = collectResources(entry, serverManifest)
       const css = resources.css.map((css) => css.src).filter((file) => !filesClientAll.includes(file))
       const assets = resources.assets.map((asset) => asset.src).filter((file) => !filesClientAll.includes(file))
       filesToMove.push(...css, ...assets)
       if (css.length > 0 || assets.length > 0) {
-        assert(!clientManifest[key])
-        clientManifest[key] = {
-          ...entry,
-          css,
-          assets,
-          dynamicImports: undefined,
-          imports: undefined,
+        const entryClient = clientManifest[key]
+        if (entryClient) {
+          assert(mergeEntryCollisions)
+          entryClient.css = unique([...(entryClient.css ?? []), ...css])
+          entryClient.assets = unique([...(entryClient.assets ?? []), ...assets])
+        } else {
+          clientManifest[key] = {
+            ...entry,
+            css,
+            assets,
+            dynamicImports: undefined,
+            imports: undefined,
+          }
         }
       }
     }
@@ -214,15 +339,28 @@ function addServerAssets(clientManifest: ViteManifest, serverManifest: ViteManif
   return { clientManifestMod, serverManifestMod, filesToMove, filesToRemove }
 }
 
-function getPageId(key: string) {
+type PageEntry = { environmentName: string; pageId: string }
+function getPageEntry(key: string): PageEntry | null {
+  const virtualFileIdIndex = key.indexOf('virtual:vike')
+  if (virtualFileIdIndex < 0) return null
+  const prefix = key.slice(0, virtualFileIdIndex)
+  // Vite sometimes prefixes manifest keys with relative path segments. Don't mistake a third-party
+  // virtual ID that merely embeds a Vike virtual ID for one of Vike's own entries.
+  if (prefix && !/^(?:\.\.\/)+$/.test(prefix)) return null
   // Normalize from:
   //   ../../virtual:vike:page-entry:client:/pages/index
   // to:
   //   virtual:vike:page-entry:client:/pages/index
   // (This seems to be needed only for vitest tests that use Vite's build() API with an inline config.)
-  key = key.substring(key.indexOf('virtual:vike'))
+  key = key.substring(virtualFileIdIndex)
   const result = parseVirtualFileId(key)
-  return result && result.type === 'page-entry' ? result.pageId : null
+  return result && result.type === 'page-entry'
+    ? { environmentName: result.environmentName, pageId: result.pageId }
+    : null
+}
+
+function getPageCorrelationKey({ environmentName, pageId }: PageEntry) {
+  return `${environmentName}\0${pageId}`
 }
 
 function collectResources(entryRoot: ViteManifestEntry, manifest: ViteManifest) {
@@ -282,7 +420,23 @@ function handleAssetsManifest_assertUsageCssCodeSplit(config: ResolvedConfig) {
 type CssTarget = ResolvedConfig['build']['cssTarget']
 type Target = ResolvedConfig['build']['target'] | CssTarget
 type TargetConfig = { global: Exclude<Target, undefined>; css: Target; isServerSide: boolean }
-function handleAssetsManifest_alignCssTarget(config: ResolvedConfig) {
+async function handleAssetsManifest_alignCssTarget(config: ResolvedConfig) {
+  const participants = await getAssetParticipants()
+  if (participants) {
+    for (const finalizer of participants.values()) {
+      if (finalizer.assets.role !== 'consumer-finalizer') continue
+      const producer = participants.get(finalizer.assets.target)
+      assert(producer?.assets.role === 'browser-producer')
+      const producerConfig = config.environments[producer.environmentName]
+      assert(producerConfig)
+      const { cssTarget } = producerConfig.build
+      assert(cssTarget)
+      const finalizerConfig = config.environments[finalizer.environmentName]
+      assert(finalizerConfig)
+      finalizerConfig.build.cssTarget = cssTarget
+    }
+    return
+  }
   globalObject.configsAll.push(config)
   const clientSideConfigs = globalObject.configsAll.filter((c) => !isViteServerSide_viteEnvOptional(c, undefined))
   if (clientSideConfigs.length === 0) return
@@ -290,8 +444,24 @@ function handleAssetsManifest_alignCssTarget(config: ResolvedConfig) {
   assert(cssTarget)
   globalObject.configsAll.forEach((c) => (c.build.cssTarget = cssTarget))
 }
-function handleAssetsManifest_assertUsageCssTarget(config: ResolvedConfig, env: Environment) {
+async function handleAssetsManifest_assertUsageCssTarget(config: ResolvedConfig, env: Environment) {
   if (!handleAssetsManifest_isFixEnabled()) return
+  const participants = await getAssetParticipants()
+  if (participants) {
+    const environmentName = env.name
+    if (!environmentName) return
+    const participant = participants.get(environmentName)
+    if (!participant || participant.assets.role !== 'consumer-finalizer') return
+    const producer = participants.get(participant.assets.target)
+    assert(producer?.assets.role === 'browser-producer')
+    const producerConfig = config.environments[producer.environmentName]
+    assert(producerConfig)
+    assertCssTargetsEqual(
+      { global: producerConfig.build.target, css: producerConfig.build.cssTarget, isServerSide: false },
+      { global: env.config.build.target, css: env.config.build.cssTarget, isServerSide: true },
+    )
+    return
+  }
   const isServerSide = isViteServerSide(config, env)
   assert(typeof isServerSide === 'boolean')
   assert(config.build.target !== undefined)
@@ -300,24 +470,27 @@ function handleAssetsManifest_assertUsageCssTarget(config: ResolvedConfig, env: 
   const targetsServer = targetsAll.filter((t) => t.isServerSide)
   const targetsClient = targetsAll.filter((t) => !t.isServerSide)
   targetsClient.forEach((targetClient) => {
-    const targetCssResolvedClient = resolveCssTarget(targetClient)
     targetsServer.forEach((targetServer) => {
-      const targetCssResolvedServer = resolveCssTarget(targetServer)
-      assertWarning(
-        isEqualStringList(targetCssResolvedClient, targetCssResolvedServer),
-        [
-          'The CSS browser target should be the same for both client and server, but we got:',
-          `Client: ${pc.cyan(JSON.stringify(targetCssResolvedClient))}`,
-          `Server: ${pc.cyan(JSON.stringify(targetCssResolvedServer))}`,
-          `Different targets lead to CSS duplication, see ${pc.underline('https://github.com/vikejs/vike/issues/1815#issuecomment-2507002979')} for more information.`,
-        ].join('\n'),
-        {
-          showStackTrace: true,
-          onlyOnce: 'different-css-target',
-        },
-      )
+      assertCssTargetsEqual(targetClient, targetServer)
     })
   })
+}
+function assertCssTargetsEqual(targetClient: TargetConfig, targetServer: TargetConfig) {
+  const targetCssResolvedClient = resolveCssTarget(targetClient)
+  const targetCssResolvedServer = resolveCssTarget(targetServer)
+  assertWarning(
+    isEqualStringList(targetCssResolvedClient, targetCssResolvedServer),
+    [
+      'The CSS browser target should be the same for both client and server, but we got:',
+      `Client: ${pc.cyan(JSON.stringify(targetCssResolvedClient))}`,
+      `Server: ${pc.cyan(JSON.stringify(targetCssResolvedServer))}`,
+      `Different targets lead to CSS duplication, see ${pc.underline('https://github.com/vikejs/vike/issues/1815#issuecomment-2507002979')} for more information.`,
+    ].join('\n'),
+    {
+      showStackTrace: true,
+      onlyOnce: 'different-css-target',
+    },
+  )
 }
 function resolveCssTarget(target: TargetConfig) {
   return target.css ?? target.global
@@ -349,6 +522,9 @@ function removeEmptyDirectories(dirPath: string): void {
 
 async function readManifestFile(config: ResolvedConfig, client: boolean) {
   const manifestFilePath = getManifestFilePath(config, client)
+  return readManifestFileAt(manifestFilePath)
+}
+async function readManifestFileAt(manifestFilePath: string) {
   const manifestFileContent = await fs.readFile(manifestFilePath, 'utf-8')
   assert(manifestFileContent)
   const manifest: unknown = JSON.parse(manifestFileContent)
@@ -385,6 +561,11 @@ async function handleAssetsManifest(
   options: { dir: string | undefined },
   bundle: Bundle,
 ) {
+  const participants = await getAssetParticipants()
+  if (participants) {
+    await handleAssetParticipants(config, viteEnv, bundle, participants)
+    return
+  }
   const isSsrEnv = isViteServerSide_onlySsrEnv(config, viteEnv)
   if (isSsrEnv) {
     const outDirs = getOutDirs(config, viteEnv)
@@ -397,7 +578,7 @@ async function handleAssetsManifest(
     // Replace ASSETS_MANIFEST in server builds
     // - Always replace it in dist/server/
     // - Also in some other server builds such as dist/vercel/ from vike-vercel
-    // - Don't replace it in dist/rsc/ from vike-react-rsc since ASSETS_MANIFEST doesn't exist there
+    // - Other server builds without ASSETS_MANIFEST are left unchanged
     const noop = await set_macro_ASSETS_MANIFEST(globalObject.assetsJsonFilePath, bundle, outDir)
     if (isSsrEnv) assert(!noop) // dist/server should always contain ASSETS_MANIFEST
   }
