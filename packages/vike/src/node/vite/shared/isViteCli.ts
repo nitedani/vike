@@ -32,26 +32,38 @@ function getViteCliCommand(): ViteCommand | null {
   // Copied & adapted from Vite
   // https://github.com/vitejs/vite/blob/d3e7eeefa91e1992f47694d16fe4dbe708c4d80e/packages/vite/src/node/cli.ts#L186-L188
   const cli = cac(desc)
+  // We only determine which command is used: options are irrelevant here, and rejecting unknown
+  // ones would make every Vite CLI option fail. (Vite owns the option list, not Vike.)
   // dev
   cli
     .command('[root]', desc)
+    .allowUnknownOptions()
     .alias('serve')
     .alias('dev')
     .action(() => {
       setCommand('dev')
     })
   // build
-  cli.command('build [root]', desc).action(() => {
-    setCommand('build')
-  })
+  cli
+    .command('build [root]', desc)
+    .allowUnknownOptions()
+    .action(() => {
+      setCommand('build')
+    })
   // optimize
-  cli.command('optimize [root]', desc).action(() => {
-    setCommand('optimize')
-  })
+  cli
+    .command('optimize [root]', desc)
+    .allowUnknownOptions()
+    .action(() => {
+      setCommand('optimize')
+    })
   // preview
-  cli.command('preview [root]', desc).action(() => {
-    setCommand('preview')
-  })
+  cli
+    .command('preview [root]', desc)
+    .allowUnknownOptions()
+    .action(() => {
+      setCommand('preview')
+    })
 
   cli.parse()
   assert(command)
@@ -168,10 +180,12 @@ function getViteCliArgs(): null | { root: string | undefined; configFile: string
     assert(options.config === undefined || typeof options.config === 'string')
     result = { root, configFile: options.config }
   }
-  cli.command('[root]', desc).alias('serve').alias('dev').action(setResult)
-  cli.command('build [root]', desc).action(setResult)
-  cli.command('optimize [root]', desc).action(setResult)
-  cli.command('preview [root]', desc).action(setResult)
+  // We only read --config here: every other option belongs to Vite, and rejecting unknown ones
+  // would make every Vite CLI option fail.
+  cli.command('[root]', desc).allowUnknownOptions().alias('serve').alias('dev').action(setResult)
+  cli.command('build [root]', desc).allowUnknownOptions().action(setResult)
+  cli.command('optimize [root]', desc).allowUnknownOptions().action(setResult)
+  cli.command('preview [root]', desc).allowUnknownOptions().action(setResult)
 
   cli.parse()
   return result
