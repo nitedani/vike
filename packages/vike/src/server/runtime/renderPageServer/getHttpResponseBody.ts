@@ -78,36 +78,29 @@ function getHttpResponseBodyStreamHandlers(
         `The ${getErrMsgBody(responseBody, renderHook)} while a ${
           writableType as string
         } was passed to pageContext.httpResponse.pipe() which is contradictory. You cannot mix a Web Stream with a Node.js Stream.` as const
-      if (responseBody instanceof Uint8Array) {
-        if (isStreamWritableWeb(writable)) {
-          const writer = writable.getWriter()
-          void writer.write(responseBody).then(() => writer.close())
+      if (isStreamWritableWeb(writable)) {
+        if (responseBody instanceof Uint8Array) {
+          pipeUint8ArrayToWritableWeb(responseBody, writable)
           return
         }
-        if (isStreamWritableNode(writable)) {
-          writable.write(responseBody)
-          writable.end()
+        const success = pipeToStreamWritableWeb(responseBody, writable)
+        if (success) {
           return
         }
-      } else {
-        if (isStreamWritableWeb(writable)) {
-          const success = pipeToStreamWritableWeb(responseBody, writable)
-          if (success) {
-            return
-          } else {
-            assert(isStreamReadableNode(responseBody) || isStreamPipeNode(responseBody))
-            assertUsage(false, getErrMsgMixingStreamTypes('Web Writable'))
-          }
+        assert(isStreamReadableNode(responseBody) || isStreamPipeNode(responseBody))
+        assertUsage(false, getErrMsgMixingStreamTypes('Web Writable'))
+      }
+      if (isStreamWritableNode(writable)) {
+        if (responseBody instanceof Uint8Array) {
+          pipeUint8ArrayToWritableNode(responseBody, writable)
+          return
         }
-        if (isStreamWritableNode(writable)) {
-          const success = pipeToStreamWritableNode(responseBody, writable)
-          if (success) {
-            return
-          } else {
-            assert(isStreamReadableWeb(responseBody) || isStreamPipeWeb(responseBody))
-            assertUsage(false, getErrMsgMixingStreamTypes('Node.js Writable'))
-          }
+        const success = pipeToStreamWritableNode(responseBody, writable)
+        if (success) {
+          return
         }
+        assert(isStreamReadableWeb(responseBody) || isStreamPipeWeb(responseBody))
+        assertUsage(false, getErrMsgMixingStreamTypes('Node.js Writable'))
       }
       assertUsage(
         false,
@@ -181,8 +174,7 @@ function getHttpResponseBodyStreamHandlers(
         { onlyOnce: true, showStackTrace: true },
       )
       if (responseBody instanceof Uint8Array) {
-        const writer = writable.getWriter()
-        void writer.write(responseBody).then(() => writer.close())
+        pipeUint8ArrayToWritableWeb(responseBody, writable)
         return
       }
       const success = pipeToStreamWritableWeb(responseBody, writable)
@@ -199,8 +191,7 @@ function getHttpResponseBodyStreamHandlers(
         { onlyOnce: true, showStackTrace: true },
       )
       if (responseBody instanceof Uint8Array) {
-        writable.write(responseBody)
-        writable.end()
+        pipeUint8ArrayToWritableNode(responseBody, writable)
         return
       }
       const success = pipeToStreamWritableNode(responseBody, writable)
@@ -217,6 +208,16 @@ function getHttpResponseBodyStreamHandlers(
     const { hookFilePath, hookName } = renderHook
     return `Make sure the ${hookName}() hook defined by ${hookFilePath} provides ${streamName} instead`
   }
+}
+
+function pipeUint8ArrayToWritableWeb(body: Uint8Array, writable: StreamWritableWeb): void {
+  const writer = writable.getWriter()
+  void writer.write(body).then(() => writer.close())
+}
+
+function pipeUint8ArrayToWritableNode(body: Uint8Array, writable: StreamWritableNode): void {
+  writable.write(body)
+  writable.end()
 }
 
 function getErrMsg(responseBody: ResponseBody, renderHook: null | RenderHook, method: string, msgAddendum?: string) {

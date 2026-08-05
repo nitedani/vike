@@ -42,24 +42,7 @@ function pluginBuildConfig(): Plugin[] {
           await handleAssetsManifest_alignCssTarget(config)
           onSetupBuild()
           assertRollupInput(config)
-          // Inject the entries per environment: Vite builds an environment from
-          // config.environments[name].build.rollupOptions.input. Writing only to the root
-          // config.build.rollupOptions.input merely happens to work while
-          // builder.sharedConfigBuild is false — Vite then re-resolves the whole config once per
-          // environment and aliases the root build onto that environment's — and is silently
-          // dropped when it's true, because the config is then shared and the root build belongs
-          // to no environment.
-          const entriesBySide = new Map<boolean, Record<string, string>>()
-          for (const [envName, envConfig] of Object.entries(config.environments)) {
-            const isServerSide = isViteServerSide_configEnvironment(envName, envConfig)
-            let entries = entriesBySide.get(isServerSide)
-            if (!entries) {
-              entries = await getEntries(config, isServerSide)
-              assert(Object.keys(entries).length > 0)
-              entriesBySide.set(isServerSide, entries)
-            }
-            envConfig.build.rollupOptions.input = injectRollupInputs(entries, envConfig.build.rollupOptions.input)
-          }
+          await injectEnvironmentEntries(config)
           addLogHook()
           handleAssetsManifest_assertUsageCssCodeSplit(config)
         },
@@ -79,6 +62,33 @@ function pluginBuildConfig(): Plugin[] {
       },
     },
   ]
+}
+
+async function injectEnvironmentEntries(config: ResolvedConfig) {
+  // With sharedConfigBuild, Vite reads inputs from each environment instead of the root build config.
+  const entriesBySide = new Map<boolean, Record<string, string>>()
+  for (const [environmentName, environmentConfig] of Object.entries(config.environments)) {
+    const isServerSide = isViteServerSide_configEnvironment(environmentName, environmentConfig)
+    const entries = await getEntriesForSide(config, isServerSide, entriesBySide)
+    environmentConfig.build.rollupOptions.input = injectRollupInputs(
+      entries,
+      environmentConfig.build.rollupOptions.input,
+    )
+  }
+}
+
+async function getEntriesForSide(
+  config: ResolvedConfig,
+  isServerSide: boolean,
+  entriesBySide: Map<boolean, Record<string, string>>,
+) {
+  const entriesCached = entriesBySide.get(isServerSide)
+  if (entriesCached) return entriesCached
+
+  const entries = await getEntries(config, isServerSide)
+  assert(Object.keys(entries).length > 0)
+  entriesBySide.set(isServerSide, entries)
+  return entries
 }
 
 async function getEntries(config: ResolvedConfig, isServerSide: boolean): Promise<Record<string, string>> {

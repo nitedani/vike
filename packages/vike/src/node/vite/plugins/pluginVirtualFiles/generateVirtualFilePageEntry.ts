@@ -26,21 +26,15 @@ async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise
   }
   */
   const { pageId, environmentName, isForClientSide } = result
-  const runtimeEnv: RuntimeEnv =
-    environmentName === 'client' || environmentName === 'server'
-      ? { isForClientSide, isClientRouting: false, isDev }
-      : { environmentName, isDev }
+  const runtimeEnv = resolveRuntimeEnv(environmentName, isForClientSide, isDev)
   const vikeConfig = await getVikeConfigInternal(true)
   const { _pageConfigs: pageConfigs } = vikeConfig
   const pageConfig = pageConfigs.find((pageConfig) => pageConfig.pageId === pageId)
 
-  if (!isDev) {
-    assert(pageConfig)
-  } else {
-    if (!pageConfig) {
-      // Happens very seldom and can't reproduce reliably. Some kind of HMR race condition? It still happens as of June 2026 with Cloudflare Workers in development — but it isn't blocking, reloading the page fixes the issue.
-      throw getProjectError(`Outdated request. Try again. ${getDebugInfoStr({ id, pageId })}`)
-    }
+  if (!isDev) assert(pageConfig)
+  if (!pageConfig) {
+    // Happens very seldom and can't reproduce reliably. Some kind of HMR race condition? It still happens as of June 2026 with Cloudflare Workers in development — but it isn't blocking, reloading the page fixes the issue.
+    throw getProjectError(`Outdated request. Try again. ${getDebugInfoStr({ id, pageId })}`)
   }
 
   const code = getCode(pageConfig, runtimeEnv, pageId, resolveIncludeAssetsImportedByServer(vikeConfig.config), isDev)
@@ -65,13 +59,7 @@ function getCode(
   lines.push(...serializeConfigValues(pageConfig, importStatements, filesEnv, runtimeEnv, '', false))
   lines.push('};')
 
-  if (
-    !handleAssetsManifest_isFixEnabled() &&
-    includeAssetsImportedByServer &&
-    'isForClientSide' in runtimeEnv &&
-    runtimeEnv.isForClientSide &&
-    !isDev
-  ) {
+  if (shouldImportAssetsFromServer(runtimeEnv, includeAssetsImportedByServer, isDev)) {
     importStatements.push(
       `import '${extractAssetsAddQuery(generateVirtualFileId({ type: 'page-entry', pageId, isForClientSide: false }))}'`,
     )
@@ -79,4 +67,21 @@ function getCode(
 
   const code = [...importStatements, ...lines].join('\n')
   return code
+}
+
+function resolveRuntimeEnv(environmentName: string, isForClientSide: boolean, isDev: boolean): RuntimeEnv {
+  if (environmentName === 'client' || environmentName === 'server') {
+    return { isForClientSide, isClientRouting: false, isDev }
+  }
+  return { environmentName, isDev }
+}
+
+function shouldImportAssetsFromServer(runtimeEnv: RuntimeEnv, includeAssetsImportedByServer: boolean, isDev: boolean) {
+  return (
+    handleAssetsManifest_isFixEnabled() === false &&
+    includeAssetsImportedByServer &&
+    'isForClientSide' in runtimeEnv &&
+    runtimeEnv.isForClientSide &&
+    isDev === false
+  )
 }

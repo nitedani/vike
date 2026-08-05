@@ -975,18 +975,7 @@ async function write(
   const { urlOriginal } = pageContext
   assert(urlOriginal.startsWith('/'))
 
-  let fileUrl: string
-  if (fileType === 'ARTIFACT') {
-    assert(fileUrlOverride)
-    fileUrl = fileUrlOverride
-  } else if (fileType === 'HTML') {
-    const doNotCreateExtraDirectory = prerenderContext._noExtraDir ?? pageContext.is404
-    fileUrl = urlToFile(urlOriginal, '.html', doNotCreateExtraDirectory)
-  } else {
-    assert(fileType === 'JSON')
-    fileUrl = getPageContextRequestUrl(urlOriginal)
-  }
-
+  const fileUrl = resolveFileUrl(pageContext, fileType, prerenderContext._noExtraDir, fileUrlOverride)
   assertPosixPath(fileUrl)
   assert(fileUrl.startsWith('/'))
   const filePathRelative = fileUrl.slice(1)
@@ -1031,6 +1020,24 @@ async function write(
       console.log(`${pc.dim(outDirClientRelative)}${pc.blue(filePathRelative)}`)
     }
   }
+}
+
+function resolveFileUrl(
+  pageContext: PageContextPrerendered,
+  fileType: FileType,
+  noExtraDir: boolean | null,
+  fileUrlOverride: string | undefined,
+): string {
+  if (fileType === 'ARTIFACT') {
+    assert(fileUrlOverride)
+    return fileUrlOverride
+  }
+  if (fileType === 'HTML') {
+    const doNotCreateExtraDirectory = noExtraDir ?? pageContext.is404
+    return urlToFile(pageContext.urlOriginal, '.html', doNotCreateExtraDirectory)
+  }
+  assert(fileType === 'JSON')
+  return getPageContextRequestUrl(pageContext.urlOriginal)
 }
 
 function validateArtifactFileUrl(fileUrl: string, renderTargetName: string): void {

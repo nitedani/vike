@@ -59,30 +59,17 @@ type VirtualFileIdEntryParsed =
 
 function parseVirtualFileId(id: string): false | VirtualFileIdEntryParsed {
   id = removeVirtualFileIdPrefix(id)
-  if (
-    !id.startsWith(virtualFileIdGlobalEntryPrefix) &&
-    !id.startsWith(virtualFileIdPageEntryPrefix) &&
-    !id.startsWith(virtualFileIdRuntimePrefix)
-  )
-    return false
+  if (!isVikeVirtualFileId(id)) return false
 
-  // Environment-local public runtime API
   if (id.startsWith(virtualFileIdRuntimePrefix)) {
     const environmentName = id.slice(virtualFileIdRuntimePrefix.length)
-    assert(environmentName && !environmentName.includes(':'))
+    assertEnvironmentName(environmentName)
     return { type: 'runtime', environmentName }
   }
 
-  // Global entry
   if (id.startsWith(virtualFileIdGlobalEntryPrefix)) {
     const isClientRouting = id === virtualFileIdGlobalEntryClientCR
-    const environmentName = (() => {
-      if (id === virtualFileIdGlobalEntryServer) return 'server'
-      if (id === virtualFileIdGlobalEntryClientSR || id === virtualFileIdGlobalEntryClientCR) return 'client'
-      const environmentName = id.slice(virtualFileIdGlobalEntryPrefix.length)
-      assert(environmentName && !environmentName.includes(':'))
-      return environmentName
-    })()
+    const environmentName = parseGlobalEntryEnvironmentName(id)
     const isForClientSide = environmentName === 'client'
     return {
       type: 'global-entry',
@@ -92,7 +79,6 @@ function parseVirtualFileId(id: string): false | VirtualFileIdEntryParsed {
     }
   }
 
-  // Page entry
   if (id.startsWith(virtualFileIdPageEntryPrefix)) {
     const idOriginal = id
     id = extractAssetsRemoveQuery(id)
@@ -117,6 +103,22 @@ function parseVirtualFileId(id: string): false | VirtualFileIdEntryParsed {
   return false
 }
 
+function isVikeVirtualFileId(id: string) {
+  return (
+    id.startsWith(virtualFileIdGlobalEntryPrefix) ||
+    id.startsWith(virtualFileIdPageEntryPrefix) ||
+    id.startsWith(virtualFileIdRuntimePrefix)
+  )
+}
+
+function parseGlobalEntryEnvironmentName(id: string) {
+  if (id === virtualFileIdGlobalEntryServer) return 'server'
+  if (id === virtualFileIdGlobalEntryClientSR || id === virtualFileIdGlobalEntryClientCR) return 'client'
+  const environmentName = id.slice(virtualFileIdGlobalEntryPrefix.length)
+  assertEnvironmentName(environmentName)
+  return environmentName
+}
+
 function generateVirtualFileId(
   args:
     | { type: 'global-entry'; isForClientSide: boolean; isClientRouting: boolean }
@@ -126,12 +128,12 @@ function generateVirtualFileId(
     | { type: 'runtime'; environmentName: string },
 ): string {
   if (args.type === 'runtime') {
-    assert(args.environmentName && !args.environmentName.includes(':'))
+    assertEnvironmentName(args.environmentName)
     return `${virtualFileIdRuntimePrefix}${args.environmentName}`
   }
   if (args.type === 'global-entry') {
     if ('environmentName' in args) {
-      assert(args.environmentName && !args.environmentName.includes(':'))
+      assertEnvironmentName(args.environmentName)
       return `${virtualFileIdGlobalEntryPrefix}${args.environmentName}`
     }
     const { isForClientSide, isClientRouting } = args
@@ -146,16 +148,18 @@ function generateVirtualFileId(
   if (args.type === 'page-entry') {
     const { pageId } = args
     const pageIdSerialized = serializePageId(pageId)
-    if (!('environmentName' in args)) {
-      const prefix = args.isForClientSide ? virtualFileIdPageEntryClient : virtualFileIdPageEntryServer
-      return `${prefix}${pageIdSerialized}`
+    if ('environmentName' in args) {
+      assertEnvironmentName(args.environmentName)
+      return `${virtualFileIdPageEntryPrefix}${args.environmentName}:${pageIdSerialized}`
     }
-    const { environmentName } = args
-    assert(environmentName && !environmentName.includes(':'))
-    const id = `${virtualFileIdPageEntryPrefix}${environmentName}:${pageIdSerialized}` as const
-    return id
+    const prefix = args.isForClientSide ? virtualFileIdPageEntryClient : virtualFileIdPageEntryServer
+    return `${prefix}${pageIdSerialized}`
   }
   assert(false)
+}
+
+function assertEnvironmentName(environmentName: string) {
+  assert(environmentName && !environmentName.includes(':'))
 }
 
 // Workaround:

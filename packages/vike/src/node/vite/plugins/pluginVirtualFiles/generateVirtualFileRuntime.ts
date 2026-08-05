@@ -6,31 +6,33 @@ import { requireResolveDistFile } from '../../../../utils/requireResolve.js'
 import '../../assertEnvVite.js'
 
 function generateVirtualFileRuntime(environmentName: string, isDev: boolean): string {
-  return generateVirtualFileRuntimeCode(
-    environmentName,
-    isDev,
-    requireResolveDistFile('dist/runtime/createRuntime.js'),
-  )
+  return generateVirtualFileRuntimeCode(environmentName, isDev, requireResolveDistFile('dist/runtime/createRuntime.js'))
 }
 
 function generateVirtualFileRuntimeCode(environmentName: string, isDev: boolean, createRuntimeFile: string): string {
-  const globalEntryId =
-    environmentName === 'client'
-      ? generateVirtualFileId({ type: 'global-entry', isForClientSide: true, isClientRouting: true })
-      : environmentName === 'ssr' || environmentName === 'server'
-        ? generateVirtualFileId({ type: 'global-entry', isForClientSide: false, isClientRouting: false })
-        : generateVirtualFileId({ type: 'global-entry', environmentName })
+  const createRuntimeFileSerialized = JSON.stringify(createRuntimeFile)
+  const environmentNameSerialized = JSON.stringify(environmentName)
+  const globalEntryIdSerialized = JSON.stringify(resolveGlobalEntryId(environmentName))
+  const isDevSerialized = JSON.stringify(isDev)
   return [
-    `import { createRuntime } from ${JSON.stringify(createRuntimeFile)};`,
-    `export const environmentName = ${JSON.stringify(environmentName)};`,
+    `import { createRuntime } from ${createRuntimeFileSerialized};`,
+    `export const environmentName = ${environmentNameSerialized};`,
     `let loadPageConfigRuntimePromise;`,
     `export async function loadPageConfig(pageId) {`,
-    `  loadPageConfigRuntimePromise ??= import(${JSON.stringify(
-      globalEntryId,
-    )}).then(({ pageConfigsSerialized, pageConfigGlobalSerialized }) =>`,
-    `    createRuntime(pageConfigsSerialized, pageConfigGlobalSerialized, ${JSON.stringify(isDev)}),`,
+    `  loadPageConfigRuntimePromise ??= import(${globalEntryIdSerialized}).then(({ pageConfigsSerialized, pageConfigGlobalSerialized }) =>`,
+    `    createRuntime(pageConfigsSerialized, pageConfigGlobalSerialized, ${isDevSerialized}),`,
     `  );`,
     `  return (await loadPageConfigRuntimePromise)(pageId);`,
     `}`,
   ].join('\n')
+}
+
+function resolveGlobalEntryId(environmentName: string) {
+  if (environmentName === 'client') {
+    return generateVirtualFileId({ type: 'global-entry', isForClientSide: true, isClientRouting: true })
+  }
+  if (environmentName === 'ssr' || environmentName === 'server') {
+    return generateVirtualFileId({ type: 'global-entry', isForClientSide: false, isClientRouting: false })
+  }
+  return generateVirtualFileId({ type: 'global-entry', environmentName })
 }

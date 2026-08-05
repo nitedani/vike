@@ -93,9 +93,8 @@ async function renderPageServerAfterRoute<
 
   if ((pageContext as typeof pageContext & PageContextRenderTarget)._renderTarget) {
     const pageContextRenderTarget = pageContext as typeof pageContext & PageContextRenderTarget
-    const outcome = await renderWithRenderTarget(pageContextRenderTarget)
     const statusCode = getStatusCodePage(pageContext)
-    const httpResponse = await createHttpResponseRenderTarget(pageContextRenderTarget, outcome, statusCode)
+    const httpResponse = await renderTargetToHttpResponse(pageContextRenderTarget, statusCode)
     objectAssign(pageContext, { httpResponse })
     return pageContext
   }
@@ -154,12 +153,7 @@ async function prerenderPageEntry(
         renderTarget.name,
       )} doesn't define prerender.filePath()`,
     )
-    const outcome = await renderWithRenderTarget(pageContextRenderTarget)
-    const httpResponse = await createHttpResponseRenderTarget(
-      pageContextRenderTarget,
-      outcome,
-      pageContext.is404 ? 404 : 200,
-    )
+    const httpResponse = await renderTargetToHttpResponse(pageContextRenderTarget, pageContext.is404 ? 404 : 200)
     const documentHtml = await httpResponse.getBody()
     return {
       documentHtml,
@@ -181,10 +175,17 @@ async function prerenderPageEntry(
   assert(typeof documentHtml === 'string')
   if (!pageContext._usesClientRouter) {
     return { documentHtml, pageContextSerialized: null, pageContext, renderTarget: null, contentType: contentTypeHtml }
-  } else {
-    const pageContextSerialized = getPageContextClientSerialized(pageContext, false)
-    return { documentHtml, pageContextSerialized, pageContext, renderTarget: null, contentType: contentTypeHtml }
   }
+  const pageContextSerialized = getPageContextClientSerialized(pageContext, false)
+  return { documentHtml, pageContextSerialized, pageContext, renderTarget: null, contentType: contentTypeHtml }
+}
+
+async function renderTargetToHttpResponse(
+  pageContext: PageContextRenderTarget & { pageId: string; headersResponse?: Headers },
+  statusCode: number,
+): Promise<HttpResponse> {
+  const outcome = await renderWithRenderTarget(pageContext)
+  return await createHttpResponseRenderTarget(pageContext, outcome, statusCode)
 }
 
 const contentTypeHtml = 'text/html;charset=utf-8'

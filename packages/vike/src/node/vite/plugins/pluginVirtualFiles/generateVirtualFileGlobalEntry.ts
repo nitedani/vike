@@ -36,12 +36,9 @@ function getCode(
   const filesEnv: FilesEnv = new Map()
 
   const isForClientSide = 'isForClientSide' in runtimeEnv && runtimeEnv.isForClientSide
-  const environmentName =
-    'environmentName' in runtimeEnv ? runtimeEnv.environmentName : isForClientSide ? 'client' : 'server'
+  const environmentName = getRuntimeEnvironmentName(runtimeEnv)
 
-  if (!isForClientSide) {
-    importStatements.push(`import '${VIRTUAL_FILE_ID_constantsGlobalThis}';`)
-  }
+  if (!isForClientSide) importStatements.push(`import '${VIRTUAL_FILE_ID_constantsGlobalThis}';`)
 
   lines.push('export const pageConfigsSerialized = [')
   lines.push(getCodePageConfigsSerialized(pageConfigs, runtimeEnv, importStatements, filesEnv))
@@ -56,11 +53,7 @@ function getCode(
     lines.push('if (import.meta.hot) import.meta.hot.accept();')
   }
 
-  let code = [...importStatements, ...lines].join('\n')
-
-  if (!isForClientSide) {
-    code = `import '${VIRTUAL_FILE_ID_constantsGlobalThis}';\n` + code
-  }
+  const code = [...importStatements, ...lines].join('\n')
 
   debug(id, environmentName.toUpperCase(), code)
   return code
@@ -80,11 +73,7 @@ function getCodePageConfigsSerialized(
     lines.push(`    pageId: ${JSON.stringify(pageId)},`)
     lines.push(`    isErrorPage: ${JSON.stringify(isErrorPage)},`)
     lines.push(`    routeFilesystem: ${JSON.stringify(routeFilesystem)},`)
-    const virtualFileId = JSON.stringify(
-      'environmentName' in runtimeEnv
-        ? generateVirtualFileId({ type: 'page-entry', pageId, environmentName: runtimeEnv.environmentName })
-        : generateVirtualFileId({ type: 'page-entry', pageId, isForClientSide: runtimeEnv.isForClientSide }),
-    )
+    const virtualFileId = JSON.stringify(getPageEntryVirtualFileId(pageId, runtimeEnv))
     lines.push(
       `    loadVirtualFilePageEntry: () => ({ moduleId: ${virtualFileId}, moduleExportsPromise: import(${virtualFileId}) }),`,
     )
@@ -96,6 +85,18 @@ function getCodePageConfigsSerialized(
 
   const code = lines.join('\n')
   return code
+}
+
+function getRuntimeEnvironmentName(runtimeEnv: RuntimeEnvRuntime) {
+  if ('environmentName' in runtimeEnv) return runtimeEnv.environmentName
+  return runtimeEnv.isForClientSide ? 'client' : 'server'
+}
+
+function getPageEntryVirtualFileId(pageId: string, runtimeEnv: RuntimeEnvRuntime) {
+  if ('environmentName' in runtimeEnv) {
+    return generateVirtualFileId({ type: 'page-entry', pageId, environmentName: runtimeEnv.environmentName })
+  }
+  return generateVirtualFileId({ type: 'page-entry', pageId, isForClientSide: runtimeEnv.isForClientSide })
 }
 
 function getCodePageConfigGlobalSerialized(

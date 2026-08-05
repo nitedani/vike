@@ -45,28 +45,37 @@ async function resolveRenderTarget(
   }
 
   const requestMeta = getRequestMeta(pageContext, request)
-  const matches = await Promise.all(
-    renderTargets.map(async (renderTarget) => {
-      const matches = await renderTarget.match(requestMeta)
-      assertUsage(
-        typeof matches === 'boolean',
-        `renderTarget ${JSON.stringify(renderTarget.name)} match() should return a boolean`,
-      )
-      return matches ? renderTarget : null
-    }),
-  )
-  const matched = matches.filter((renderTarget): renderTarget is RenderTarget => renderTarget !== null)
-  assertUsage(
-    matched.length <= 1,
-    `Request ${pageContext.urlOriginal} matches multiple render targets: ${matched
-      .map(({ name }) => JSON.stringify(name))
-      .join(', ')}`,
-  )
+  const renderTarget = await findMatchingRenderTarget(renderTargets, requestMeta)
   objectAssign(pageContext, {
-    _renderTarget: matched[0] ?? null,
+    _renderTarget: renderTarget,
     _renderTargetRequestData: undefined,
   })
   return pageContext
+}
+
+async function findMatchingRenderTarget(
+  renderTargets: RenderTarget[],
+  requestMeta: RenderTargetRequestMeta,
+): Promise<RenderTarget | null> {
+  const matchingRenderTargets = (
+    await Promise.all(
+      renderTargets.map(async (renderTarget) => {
+        const matchesRequest = await renderTarget.match(requestMeta)
+        assertUsage(
+          typeof matchesRequest === 'boolean',
+          `renderTarget ${JSON.stringify(renderTarget.name)} match() should return a boolean`,
+        )
+        return matchesRequest ? renderTarget : null
+      }),
+    )
+  ).filter((renderTarget): renderTarget is RenderTarget => renderTarget !== null)
+  assertUsage(
+    matchingRenderTargets.length <= 1,
+    `Request ${requestMeta.urlOriginal} matches multiple render targets: ${matchingRenderTargets
+      .map(({ name }) => JSON.stringify(name))
+      .join(', ')}`,
+  )
+  return matchingRenderTargets[0] ?? null
 }
 
 async function prepareRenderTarget(pageContext: PageContextRenderTarget, request: Request | null): Promise<void> {

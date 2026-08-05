@@ -77,7 +77,7 @@ import { loadPointerImport, loadValueFile } from './resolveVikeConfigInternal/lo
 import { resolvePointerImport } from './resolveVikeConfigInternal/resolvePointerImport.js'
 import { parsePointerImportData } from './resolveVikeConfigInternal/pointerImports.js'
 import { getFilePathResolved } from './getFilePath.js'
-import type { FilePath } from '../../../types/FilePath.js'
+import type { FilePath, FilePathResolved } from '../../../types/FilePath.js'
 import { getConfigValueBuildTime } from '../../../shared-server-client/page-configs/getConfigValueBuildTime.js'
 import {
   resolveGlobalConfigPublic,
@@ -555,38 +555,56 @@ function resolveRuntimeEnvironmentDeclarations(
   value.forEach((declaration, index) => {
     const declarationDefinedAt = `${configDefinedAt} > runtimeEnvironments[${index}]`
     assertUsage(isObject(declaration), `${declarationDefinedAt} should be an object`)
-    assertKeys(declaration, ['name', 'assets'] as const, `${declarationDefinedAt} has`)
-    assertUsage(typeof declaration.name === 'string', `${declarationDefinedAt}.name should be a string`)
-    assertUsage(
-      /^[A-Za-z0-9_-]+$/.test(declaration.name),
-      `${declarationDefinedAt}.name should contain only letters, numbers, underscores, or hyphens`,
-    )
-    assertUsage(
-      !['client', 'server', 'ssr', 'config'].includes(declaration.name),
-      `${declarationDefinedAt}.name is ${pc.cyan(declaration.name)} which is reserved by Vike`,
-    )
-    assertUsage(!names.has(declaration.name), `${configDefinedAt} defines ${pc.cyan(declaration.name)} more than once`)
-    names.add(declaration.name)
-
-    assertUsage(isObject(declaration.assets), `${declarationDefinedAt}.assets should be an object`)
-    const { assets } = declaration
-    assertUsage(typeof assets.role === 'string', `${declarationDefinedAt}.assets.role should be a string`)
-    if (assets.role === 'consumer-finalizer') {
-      assertKeys(assets, ['role', 'target'] as const, `${declarationDefinedAt}.assets has`)
-      assertUsage(
-        typeof assets.target === 'string' && assets.target.length > 0,
-        `${declarationDefinedAt}.assets.target should be a non-empty string`,
-      )
-    } else {
-      assertUsage(
-        assets.role === 'browser-producer' || assets.role === 'renderer-private',
-        `${declarationDefinedAt}.assets.role has an invalid value ${pc.cyan(JSON.stringify(assets.role))}`,
-      )
-      assertKeys(assets, ['role'] as const, `${declarationDefinedAt}.assets has`)
-    }
+    assertRuntimeEnvironmentDeclaration(declaration, declarationDefinedAt, configDefinedAt, names)
   })
 
   const declarations = value as RuntimeEnvironmentDeclaration[]
+  assertRuntimeEnvironmentTargets(declarations, configDefinedAt)
+  return declarations
+}
+
+function assertRuntimeEnvironmentDeclaration(
+  declaration: Record<string, unknown>,
+  declarationDefinedAt: string,
+  configDefinedAt: string,
+  names: Set<string>,
+) {
+  assertKeys(declaration, ['name', 'assets'] as const, `${declarationDefinedAt} has`)
+  assertUsage(typeof declaration.name === 'string', `${declarationDefinedAt}.name should be a string`)
+  assertUsage(
+    /^[A-Za-z0-9_-]+$/.test(declaration.name),
+    `${declarationDefinedAt}.name should contain only letters, numbers, underscores, or hyphens`,
+  )
+  assertUsage(
+    !['client', 'server', 'ssr', 'config'].includes(declaration.name),
+    `${declarationDefinedAt}.name is ${pc.cyan(declaration.name)} which is reserved by Vike`,
+  )
+  assertUsage(!names.has(declaration.name), `${configDefinedAt} defines ${pc.cyan(declaration.name)} more than once`)
+  names.add(declaration.name)
+
+  assertUsage(isObject(declaration.assets), `${declarationDefinedAt}.assets should be an object`)
+  assertRuntimeEnvironmentAssets(declaration.assets, declarationDefinedAt)
+}
+
+function assertRuntimeEnvironmentAssets(assets: Record<string, unknown>, declarationDefinedAt: string) {
+  assertUsage(typeof assets.role === 'string', `${declarationDefinedAt}.assets.role should be a string`)
+  if (assets.role === 'consumer-finalizer') {
+    assertKeys(assets, ['role', 'target'] as const, `${declarationDefinedAt}.assets has`)
+    assertUsage(
+      typeof assets.target === 'string' && assets.target.length > 0,
+      `${declarationDefinedAt}.assets.target should be a non-empty string`,
+    )
+    return
+  }
+
+  assertUsage(
+    assets.role === 'browser-producer' || assets.role === 'renderer-private',
+    `${declarationDefinedAt}.assets.role has an invalid value ${pc.cyan(JSON.stringify(assets.role))}`,
+  )
+  assertKeys(assets, ['role'] as const, `${declarationDefinedAt}.assets has`)
+}
+
+function assertRuntimeEnvironmentTargets(declarations: RuntimeEnvironmentDeclaration[], configDefinedAt: string) {
   const browserProducers = new Set([
     'client',
     ...declarations.filter(({ assets }) => assets.role === 'browser-producer').map(({ name }) => name),
@@ -603,8 +621,6 @@ function resolveRuntimeEnvironmentDeclarations(
       )}`,
     )
   })
-
-  return declarations
 }
 
 function assertConfigEnvRuntimeNames(
@@ -1863,35 +1879,38 @@ function getConfVal(
 
 function resolveConfigEnv(configEnv: ConfigEnv, filePath: FilePath, runtimeEnvironmentNames: string[]) {
   const configEnvResolved = { ...configEnv }
+  if (!filePath.filePathAbsoluteFilesystem) return configEnvResolved
 
-  if (filePath.filePathAbsoluteFilesystem) {
-    const suffixes = getFileSuffixes(filePath.fileName)
-    const runtimeSuffixes = runtimeEnvironmentNames.filter((name) => filePath.fileName.includes(`.${name}.`))
-    assertUsage(
-      runtimeSuffixes.length <= 1,
-      `${filePath.filePathToShowToUser} has more than one named runtime suffix: ${runtimeSuffixes.join(', ')}`,
-    )
-    const runtimeSuffix = runtimeSuffixes[0]
-    if (runtimeSuffix) {
-      configEnvResolved.server = false
-      configEnvResolved.client = false
-      configEnvResolved.runtimes = runtimeSuffix
-    } else if (suffixes.includes('ssr') || suffixes.includes('server')) {
-      configEnvResolved.server = true
-      configEnvResolved.client = false
-      delete configEnvResolved.runtimes
-    } else if (suffixes.includes('client')) {
-      configEnvResolved.client = true
-      configEnvResolved.server = false
-      delete configEnvResolved.runtimes
-    } else if (suffixes.includes('shared')) {
-      configEnvResolved.server = true
-      configEnvResolved.client = true
-      delete configEnvResolved.runtimes
-    }
+  const suffixes = getFileSuffixes(filePath.fileName)
+  const runtimeSuffix = resolveRuntimeEnvironmentSuffix(filePath, runtimeEnvironmentNames)
+  if (runtimeSuffix) {
+    configEnvResolved.server = false
+    configEnvResolved.client = false
+    configEnvResolved.runtimes = runtimeSuffix
+  } else if (suffixes.includes('ssr') || suffixes.includes('server')) {
+    configEnvResolved.server = true
+    configEnvResolved.client = false
+    delete configEnvResolved.runtimes
+  } else if (suffixes.includes('client')) {
+    configEnvResolved.client = true
+    configEnvResolved.server = false
+    delete configEnvResolved.runtimes
+  } else if (suffixes.includes('shared')) {
+    configEnvResolved.server = true
+    configEnvResolved.client = true
+    delete configEnvResolved.runtimes
   }
 
   return configEnvResolved
+}
+
+function resolveRuntimeEnvironmentSuffix(filePath: FilePathResolved, runtimeEnvironmentNames: string[]) {
+  const runtimeSuffixes = runtimeEnvironmentNames.filter((name) => filePath.fileName.includes(`.${name}.`))
+  assertUsage(
+    runtimeSuffixes.length <= 1,
+    `${filePath.filePathToShowToUser} has more than one named runtime suffix: ${runtimeSuffixes.join(', ')}`,
+  )
+  return runtimeSuffixes[0]
 }
 
 /** Whether configs defined in `locationId` apply to every page */

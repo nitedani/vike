@@ -72,6 +72,22 @@ async function getAssetParticipants() {
   return resolveAssetParticipants(vikeConfig.config.runtimeEnvironments)
 }
 
+function getConsumerFinalizer(
+  participants: Map<string, AssetParticipant>,
+  environmentName: string | undefined,
+): AssetParticipant | null {
+  if (!environmentName) return null
+  const participant = participants.get(environmentName)
+  return participant?.assets.role === 'consumer-finalizer' ? participant : null
+}
+
+function getTargetProducer(participants: Map<string, AssetParticipant>, finalizer: AssetParticipant): AssetParticipant {
+  assert(finalizer.assets.role === 'consumer-finalizer')
+  const producer = participants.get(finalizer.assets.target)
+  assert(producer?.assets.role === 'browser-producer')
+  return producer
+}
+
 // yes  => use workaround config.build.ssrEmitAssets
 // false => use workaround extractAssets plugin
 function handleAssetsManifest_isFixEnabled(): boolean {
@@ -137,12 +153,9 @@ async function handleAssetParticipants(
   bundle: Bundle,
   participants: Map<string, AssetParticipant>,
 ) {
-  const environmentName = viteEnv.name
-  if (!environmentName) return
-  const finalizer = participants.get(environmentName)
-  if (!finalizer || finalizer.assets.role !== 'consumer-finalizer') return
-  const producer = participants.get(finalizer.assets.target)
-  assert(producer?.assets.role === 'browser-producer')
+  const finalizer = getConsumerFinalizer(participants, viteEnv.name)
+  if (!finalizer) return
+  const producer = getTargetProducer(participants, finalizer)
 
   const producerManifestFilePath = getParticipantManifestFilePath(config, producer)
   const finalizerManifestFilePath = getParticipantManifestFilePath(config, finalizer)
@@ -173,20 +186,24 @@ async function handleAssetParticipants(
 }
 
 function getParticipantOutDir(config: ResolvedConfig, participant: AssetParticipant) {
-  const environment = config.environments[participant.environmentName]
-  assert(environment)
+  const environment = getParticipantEnvironment(config, participant)
   const outDir = environment.build.outDir
   assert(outDir)
   return toPosixPath(path.resolve(config.root, outDir))
 }
 
 function getParticipantManifestFilePath(config: ResolvedConfig, participant: AssetParticipant) {
-  const environment = config.environments[participant.environmentName]
-  assert(environment)
+  const environment = getParticipantEnvironment(config, participant)
   return path.posix.join(
     getParticipantOutDir(config, participant),
     getManifestFilePathRelative(environment.build.manifest),
   )
+}
+
+function getParticipantEnvironment(config: ResolvedConfig, participant: AssetParticipant) {
+  const environment = config.environments[participant.environmentName]
+  assert(environment)
+  return environment
 }
 
 function getParticipantAssetsJsonFilePath(config: ResolvedConfig, producer: AssetParticipant) {
@@ -425,14 +442,11 @@ async function handleAssetsManifest_alignCssTarget(config: ResolvedConfig) {
   if (participants) {
     for (const finalizer of participants.values()) {
       if (finalizer.assets.role !== 'consumer-finalizer') continue
-      const producer = participants.get(finalizer.assets.target)
-      assert(producer?.assets.role === 'browser-producer')
-      const producerConfig = config.environments[producer.environmentName]
-      assert(producerConfig)
+      const producer = getTargetProducer(participants, finalizer)
+      const producerConfig = getParticipantEnvironment(config, producer)
       const { cssTarget } = producerConfig.build
       assert(cssTarget)
-      const finalizerConfig = config.environments[finalizer.environmentName]
-      assert(finalizerConfig)
+      const finalizerConfig = getParticipantEnvironment(config, finalizer)
       finalizerConfig.build.cssTarget = cssTarget
     }
     return
@@ -448,14 +462,10 @@ async function handleAssetsManifest_assertUsageCssTarget(config: ResolvedConfig,
   if (!handleAssetsManifest_isFixEnabled()) return
   const participants = await getAssetParticipants()
   if (participants) {
-    const environmentName = env.name
-    if (!environmentName) return
-    const participant = participants.get(environmentName)
-    if (!participant || participant.assets.role !== 'consumer-finalizer') return
-    const producer = participants.get(participant.assets.target)
-    assert(producer?.assets.role === 'browser-producer')
-    const producerConfig = config.environments[producer.environmentName]
-    assert(producerConfig)
+    const finalizer = getConsumerFinalizer(participants, env.name)
+    if (!finalizer) return
+    const producer = getTargetProducer(participants, finalizer)
+    const producerConfig = getParticipantEnvironment(config, producer)
     assertCssTargetsEqual(
       { global: producerConfig.build.target, css: producerConfig.build.cssTarget, isServerSide: false },
       { global: env.config.build.target, css: env.config.build.cssTarget, isServerSide: true },
