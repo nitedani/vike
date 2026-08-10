@@ -25,7 +25,6 @@ import {
 } from './html/stream.js'
 import { assert, assertUsage, assertWarning } from '../../../utils/assert.js'
 import { getHtmlString, type HtmlRender } from './html/renderHtml.js'
-import type { RenderHook } from './execHookOnRenderHtml.js'
 import pc from '@brillout/picocolors'
 import '../../assertEnvServer.js'
 
@@ -47,39 +46,40 @@ type HttpResponseBody = {
   pipeToWebWritable: StreamPipeWeb
 }
 
-function getHttpResponseBody(htmlRender: HtmlRender, renderHook: null | RenderHook) {
-  if (typeof htmlRender !== 'string') {
+type BodyHook = { hookFilePath: string; hookName: string }
+
+function getHttpResponseBody(responseBody: HtmlRender, renderHook: null | BodyHook) {
+  if (typeof responseBody !== 'string') {
     assertUsage(
       false,
-      getErrMsg(htmlRender, renderHook, 'body', `Use ${pc.cyan('pageContext.httpResponse.pipe()')} instead`),
+      getErrMsg(responseBody, renderHook, 'body', `Use ${pc.cyan('pageContext.httpResponse.pipe()')} instead`),
     )
   }
-  const body = htmlRender
-  return body
+  return responseBody
 }
 
-function getHttpResponseBodyStreamHandlers(htmlRender: HtmlRender, renderHook: null | RenderHook) {
+function getHttpResponseBodyStreamHandlers(responseBody: HtmlRender, renderHook: null | BodyHook) {
   return {
     pipe(writable: StreamWritableNode | StreamWritableWeb) {
       const getErrMsgMixingStreamTypes = (writableType: 'Web Writable' | 'Node.js Writable') =>
-        `The ${getErrMsgBody(htmlRender, renderHook)} while a ${
+        `The ${getErrMsgBody(responseBody, renderHook)} while a ${
           writableType as string
         } was passed to pageContext.httpResponse.pipe() which is contradictory. You cannot mix a Web Stream with a Node.js Stream.` as const
       if (isStreamWritableWeb(writable)) {
-        const success = pipeToStreamWritableWeb(htmlRender, writable)
+        const success = pipeToStreamWritableWeb(responseBody, writable)
         if (success) {
           return
         } else {
-          assert(isStreamReadableNode(htmlRender) || isStreamPipeNode(htmlRender))
+          assert(isStreamReadableNode(responseBody) || isStreamPipeNode(responseBody))
           assertUsage(false, getErrMsgMixingStreamTypes('Web Writable'))
         }
       }
       if (isStreamWritableNode(writable)) {
-        const success = pipeToStreamWritableNode(htmlRender, writable)
+        const success = pipeToStreamWritableNode(responseBody, writable)
         if (success) {
           return
         } else {
-          assert(isStreamReadableWeb(htmlRender) || isStreamPipeWeb(htmlRender))
+          assert(isStreamReadableWeb(responseBody) || isStreamPipeWeb(responseBody))
           assertUsage(false, getErrMsgMixingStreamTypes('Node.js Writable'))
         }
       }
@@ -91,22 +91,24 @@ function getHttpResponseBodyStreamHandlers(htmlRender: HtmlRender, renderHook: n
       )
     },
     getReadableWebStream() {
-      const webStream = getStreamReadableWeb(htmlRender)
+      const webStream = getStreamReadableWeb(responseBody)
       if (webStream === null) {
-        assertUsage(false, getErrMsg(htmlRender, renderHook, 'getReadableWebStream()', getFixMsg('readable', 'web')))
+        assertUsage(false, getErrMsg(responseBody, renderHook, 'getReadableWebStream()', getFixMsg('readable', 'web')))
       }
       return webStream
     },
     async getReadableNodeStream() {
-      const nodeStream = await getStreamReadableNode(htmlRender)
+      const nodeStream = await getStreamReadableNode(responseBody)
       if (nodeStream === null) {
-        assertUsage(false, getErrMsg(htmlRender, renderHook, 'getReadableNodeStream()', getFixMsg('readable', 'node')))
+        assertUsage(
+          false,
+          getErrMsg(responseBody, renderHook, 'getReadableNodeStream()', getFixMsg('readable', 'node')),
+        )
       }
       return nodeStream
     },
     async getBody(): Promise<string> {
-      const body = await getHtmlString(htmlRender)
-      return body
+      return await getHtmlString(responseBody)
     },
     // TO-DO/next-major-release: remove
     async getNodeStream() {
@@ -116,9 +118,9 @@ function getHttpResponseBodyStreamHandlers(htmlRender: HtmlRender, renderHook: n
           streamDocs,
         { onlyOnce: true, showStackTrace: true },
       )
-      const nodeStream = await getStreamReadableNode(htmlRender)
+      const nodeStream = await getStreamReadableNode(responseBody)
       if (nodeStream === null) {
-        assertUsage(false, getErrMsg(htmlRender, renderHook, 'getNodeStream()', getFixMsg('readable', 'node')))
+        assertUsage(false, getErrMsg(responseBody, renderHook, 'getNodeStream()', getFixMsg('readable', 'node')))
       }
       return nodeStream
     },
@@ -130,9 +132,9 @@ function getHttpResponseBodyStreamHandlers(htmlRender: HtmlRender, renderHook: n
           streamDocs,
         { onlyOnce: true, showStackTrace: true },
       )
-      const webStream = getStreamReadableWeb(htmlRender)
+      const webStream = getStreamReadableWeb(responseBody)
       if (webStream === null) {
-        assertUsage(false, getErrMsg(htmlRender, renderHook, 'getWebStream()', getFixMsg('readable', 'web')))
+        assertUsage(false, getErrMsg(responseBody, renderHook, 'getWebStream()', getFixMsg('readable', 'web')))
       }
       return webStream
     },
@@ -144,9 +146,9 @@ function getHttpResponseBodyStreamHandlers(htmlRender: HtmlRender, renderHook: n
           streamDocs,
         { onlyOnce: true, showStackTrace: true },
       )
-      const success = pipeToStreamWritableWeb(htmlRender, writable)
+      const success = pipeToStreamWritableWeb(responseBody, writable)
       if (!success) {
-        assertUsage(false, getErrMsg(htmlRender, renderHook, 'pipeToWebWritable()'))
+        assertUsage(false, getErrMsg(responseBody, renderHook, 'pipeToWebWritable()'))
       }
     },
     // TO-DO/next-major-release: remove
@@ -157,9 +159,9 @@ function getHttpResponseBodyStreamHandlers(htmlRender: HtmlRender, renderHook: n
           streamDocs,
         { onlyOnce: true, showStackTrace: true },
       )
-      const success = pipeToStreamWritableNode(htmlRender, writable)
+      const success = pipeToStreamWritableNode(responseBody, writable)
       if (!success) {
-        assertUsage(false, getErrMsg(htmlRender, renderHook, 'pipeToNodeWritable()'))
+        assertUsage(false, getErrMsg(responseBody, renderHook, 'pipeToNodeWritable()'))
       }
     },
   }
@@ -167,23 +169,23 @@ function getHttpResponseBodyStreamHandlers(htmlRender: HtmlRender, renderHook: n
   function getFixMsg(kind: 'pipe' | 'readable', type: 'web' | 'node') {
     const streamName = getStreamName(kind, type)
     assert(['a ', 'an ', 'the '].some((s) => streamName.startsWith(s)))
-    assert(renderHook)
+    if (!renderHook) return `Use ${streamName} instead`
     const { hookFilePath, hookName } = renderHook
     return `Make sure the ${hookName}() hook defined by ${hookFilePath} provides ${streamName} instead`
   }
 }
 
-function getErrMsg(htmlRender: HtmlRender, renderHook: null | RenderHook, method: string, msgAddendum?: string) {
+function getErrMsg(responseBody: HtmlRender, renderHook: null | BodyHook, method: string, msgAddendum?: string) {
   assert(!msgAddendum || !msgAddendum.endsWith('.'))
-  const errMsgBody = getErrMsgBody(htmlRender, renderHook)
+  const errMsgBody = getErrMsgBody(responseBody, renderHook)
   return [`pageContext.httpResponse.${method} can't be used because the ${errMsgBody}`, msgAddendum, streamDocs]
     .filter(Boolean)
     .join('. ')
 }
-function getErrMsgBody(htmlRender: HtmlRender, renderHook: null | RenderHook) {
-  assert(renderHook)
+function getErrMsgBody(responseBody: HtmlRender, renderHook: null | BodyHook) {
+  if (!renderHook) return `response body is ${getHookReturnType(responseBody)}`
   const { hookFilePath, hookName } = renderHook
-  const hookReturnType = getHookReturnType(htmlRender)
+  const hookReturnType = getHookReturnType(responseBody)
   assert(['a ', 'an ', 'the '].some((s) => hookReturnType.startsWith(s)))
   const errMsgBody = `${hookName as string}()\ hook defined by ${hookFilePath} provides ${
     hookReturnType as string
@@ -191,11 +193,11 @@ function getErrMsgBody(htmlRender: HtmlRender, renderHook: null | RenderHook) {
   assert(!errMsgBody.endsWith(' '))
   return errMsgBody
 }
-function getHookReturnType(htmlRender: HtmlRender) {
-  if (typeof htmlRender === 'string') {
+function getHookReturnType(responseBody: HtmlRender) {
+  if (typeof responseBody === 'string') {
     return 'an HTML string'
-  } else if (isStream(htmlRender)) {
-    return inferStreamName(htmlRender)
+  } else if (isStream(responseBody)) {
+    return inferStreamName(responseBody)
   } else {
     assert(false)
   }
