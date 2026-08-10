@@ -4,6 +4,7 @@ export { handleAssetsManifest_isFixEnabled }
 export { handleAssetsManifest_assertUsageCssCodeSplit }
 export { handleAssetsManifest_assertUsageCssTarget }
 export { handleAssetsManifest_alignCssTarget }
+export { getPageId }
 
 import fs from 'node:fs/promises'
 import fs_sync from 'node:fs'
@@ -215,12 +216,18 @@ function addServerAssets(clientManifest: ViteManifest, serverManifest: ViteManif
 }
 
 function getPageId(key: string) {
+  const virtualFileIdIndex = key.indexOf('virtual:vike')
+  if (virtualFileIdIndex < 0) return null
+  const prefix = key.slice(0, virtualFileIdIndex)
+  // Vite sometimes prefixes manifest keys with relative path segments. Don't mistake a third-party
+  // virtual ID that merely embeds a Vike virtual ID for one of Vike's own entries.
+  if (prefix && !/^(?:\.\.\/)+$/.test(prefix)) return null
   // Normalize from:
   //   ../../virtual:vike:page-entry:client:/pages/index
   // to:
   //   virtual:vike:page-entry:client:/pages/index
   // (This seems to be needed only for vitest tests that use Vite's build() API with an inline config.)
-  key = key.substring(key.indexOf('virtual:vike'))
+  key = key.substring(virtualFileIdIndex)
   const result = parseVirtualFileId(key)
   return result && result.type === 'page-entry' ? result.pageId : null
 }
