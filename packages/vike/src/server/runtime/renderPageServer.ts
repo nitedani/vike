@@ -5,7 +5,7 @@ export type { PageContextInitInternal }
 export type { PageContextBegin }
 export type { RequestTag }
 
-import { renderPageServerAfterRoute } from './renderPageServer/renderPageServerAfterRoute.js'
+import { renderPageServerAfterRoute, renderPageServerResponse } from './renderPageServer/renderPageServerAfterRoute.js'
 import {
   createPageContextServer,
   createPageContextServerWithoutGlobalContext,
@@ -85,7 +85,8 @@ import {
   type EnhancedMiddleware,
   type UniversalHandler,
 } from '@universal-middleware/core'
-import { createRequestAdapter } from '@universal-middleware/node/request'
+import { resolveRequest } from './renderPageServer/resolveRequest.js'
+import { resolvePageContextResponse } from './renderPageServer/resolvePageContextResponse.js'
 
 const globalObject = getGlobalObject('runtime/renderPageServer.ts', {
   httpRequestsCount: 0,
@@ -170,9 +171,16 @@ async function renderPageServerEntryOnceBegin(
   }
   const { globalContext } = await getGlobalContextServerInternal()
 
-  const pageContextBegin = getPageContextBegin(pageContextInit, globalContext, requestId, asyncStore)
-
   const middlewares: EnhancedMiddleware[] = (globalContext.config.middleware ?? []).flat()
+  const { request, requestForMiddleware } = resolveRequest(pageContextInit, middlewares.length > 0)
+  const pageContextBegin = getPageContextBegin(
+    pageContextInit,
+    globalContext,
+    requestId,
+    asyncStore,
+    request,
+    requestForMiddleware,
+  )
   const renderPageServerEntry = () => renderPageServerEntryOnce(pageContextBegin, globalContext, requestId)
   if (middlewares.length === 0) {
     return renderPageServerEntry()
@@ -242,6 +250,10 @@ async function renderPageServerEntryRecursive(
     return await onError(err)
   }
   objectAssign(pageContextNominalPageBegin, pageContextFromRoute)
+  {
+    const pageContextWithResponse = resolvePageContextResponse(pageContextNominalPageBegin)
+    if (pageContextWithResponse) return pageContextWithResponse
+  }
   if (pageContextNominalPageBegin.pageId !== null) {
     assert(pageContextNominalPageBegin.pageId)
     objectAssign(pageContextNominalPageBegin, { is404: null })
@@ -335,7 +347,7 @@ async function renderPageServerEntryRecursive_onError(
       const handled = await handleAbort(
         errErrorPage,
         pageContextBegin,
-        pageContextNominalPageBegin,
+        pageContextErrorPageInit,
         requestId,
         pageContextErrorPageInit,
         globalContext,
@@ -354,20 +366,19 @@ async function renderPageServerEntryRecursive_onError(
           )} doesn't occur while the error page is being rendered.`,
           { onlyOnce: false },
         )
-        const pageContextHttpErrorFallback = getPageContextHttpErrorFallback(err, pageContextBegin)
+        const pageContextHttpErrorFallback = await getPageContextHttpErrorFallback(err, pageContextBegin)
         return pageContextHttpErrorFallback
       }
     }
     if (!isSameErrorMessage(errErrorPage, err)) {
       logRuntimeError(errErrorPage, pageContextErrorPageInit)
     }
-    const pageContextHttpErrorFallback = getPageContextHttpErrorFallback(err, pageContextBegin)
+    const pageContextHttpErrorFallback = await getPageContextHttpErrorFallback(err, pageContextBegin)
     return pageContextHttpErrorFallback
   }
   return pageContextErrorPage
 }
 
-const requestAdapter = createRequestAdapter()
 async function renderPageServerEntryWithMiddlewares(
   pageContext: PageContextBegin,
   renderPageServerEntry: () => Promise<PageContextAfterRender>,
@@ -400,15 +411,8 @@ async function renderPageServerEntryWithMiddlewares(
   ])
   const handler = router[universalSymbol] as UniversalHandler
 
-  const request =
-    pageContext._reqWeb ??
-    (pageContext._nodeDev
-      ? requestAdapter(pageContext._nodeDev.req, pageContext._nodeDev.res)
-      : new Request(new URL(pageContext.urlOriginal, 'http://localhost').toString(), {
-          headers: pageContext.headers ?? {},
-        }))
-
-  const res = await handler(request, {}, getAdapterRuntime('other', { params: undefined }))
+  assert(pageContext._requestForMiddleware)
+  const res = await handler(pageContext._requestForMiddleware, {}, getAdapterRuntime('other', { params: undefined }))
 
   const httpResponse = createHttpResponseFromUniversalMiddleware(res, httpResponseVikeCore?.earlyHints)
   objectAssign(pageContext, { httpResponse })
@@ -482,11 +486,11 @@ function prettyUrl(url: string) {
 
 function getPageContextHttpErrorFallback(err: unknown, pageContextBegin: PageContextBegin) {
   const pageContextHttpErrorFallback = fork(pageContextBegin)
-  const httpResponse = createHttpResponseErrorFallback(pageContextBegin)
   objectAssign(pageContextHttpErrorFallback, {
-    httpResponse,
     errorWhileRendering: err,
   })
+  const httpResponse = createHttpResponseErrorFallback(pageContextBegin)
+  objectAssign(pageContextHttpErrorFallback, { httpResponse })
   return pageContextHttpErrorFallback
 }
 function getPageContextHttpErrorFallback_noGlobalContext(
@@ -508,6 +512,8 @@ function getPageContextBegin(
   globalContext: GlobalContextServerInternal,
   requestId: number,
   asyncStore: AsyncStore,
+  request: Request | undefined,
+  requestForMiddleware: Request | null,
 ) {
   const { isClientSideNavigation, _urlHandler, _isPageContextJsonRequest } = handlePageContextUrl(
     pageContextInit.urlOriginal,
@@ -517,11 +523,13 @@ function getPageContextBegin(
     urlHandler: _urlHandler,
     isClientSideNavigation,
     requestId,
+    request,
   })
   objectAssign(pageContextBegin, {
     _requestId: requestId,
     _asyncStore: asyncStore,
     _isPageContextJsonRequest,
+    _requestForMiddleware: requestForMiddleware,
     // This array is shared between all pageContext objects, i.e. the following is true for any `i` and `j` index:
     // ```js
     // const pageContextsAborted_i = pageContextsAborted[i].pageContextsAborted
@@ -636,17 +644,16 @@ function normalize(url: string) {
 async function handleAbort(
   errAbort: ErrorAbort,
   pageContextBegin: PageContextBegin,
-  // handleAbortError() creates a new pageContext object and we don't merge pageContextNominalPageBegin to it: we only use some pageContextNominalPageBegin information.
-  pageContextNominalPageBegin: PageContextBegin,
+  pageContextAtAbort: PageContextBegin,
   requestId: number,
   pageContextErrorPageInit: Omit<PageContext_loadPageConfigsLazyServerSide, 'pageId'>,
   globalContext: GlobalContextServerInternal,
 ) {
-  logAbort(errAbort, globalContext._isProduction, pageContextNominalPageBegin)
+  logAbort(errAbort, globalContext._isProduction, pageContextAtAbort)
   const pageContextAbort = errAbort._pageContextAbort
   assert(pageContextAbort)
 
-  addNewPageContextAborted(pageContextBegin.pageContextsAborted, pageContextNominalPageBegin, pageContextAbort)
+  addNewPageContextAborted(pageContextBegin.pageContextsAborted, pageContextAtAbort, pageContextAbort)
 
   const pageContext = fork(pageContextBegin)
   const pageContextAddendumAbort = getPageContextAddendumAbort(pageContextBegin.pageContextsAborted)
@@ -688,6 +695,20 @@ async function handleAbort(
 
   // URL Redirection — `throw redirect()`
   if (pageContextAbort._urlRedirect) {
+    const pageContextResponse = fork(pageContextAtAbort)
+    objectAssign(pageContextResponse, pageContextAddendumAbort)
+    {
+      const pageContextWithResponse = resolvePageContextResponse(pageContextResponse)
+      if (pageContextWithResponse) return { pageContextReturn: pageContextWithResponse }
+    }
+    if ('_pageConfig' in pageContextResponse) {
+      try {
+        const pageContextWithResponse = await renderPageServerResponse(pageContextResponse as any, false)
+        if (pageContextWithResponse) return { pageContextReturn: pageContextWithResponse }
+      } catch (errHook) {
+        logRuntimeError(errHook, pageContextResponse)
+      }
+    }
     const httpResponse = createHttpResponseRedirect(pageContextAbort._urlRedirect, pageContextBegin)
     objectAssign(pageContext, { httpResponse })
     return { pageContextReturn: pageContext }

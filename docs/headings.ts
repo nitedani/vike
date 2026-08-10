@@ -699,6 +699,11 @@ const headings = [
   },
   {
     level: 2,
+    title: '`+alwaysFetchPageContextFromServer`',
+    url: '/alwaysFetchPageContextFromServer',
+  },
+  {
+    level: 2,
     title: '`+headersResponse`',
     url: '/headersResponse',
   },
@@ -712,6 +717,7 @@ const headings = [
     title: '`+meta`',
     url: '/meta',
     sectionTitles: [
+      'Named runtime environments',
       'Example: `+dataEndpointUrl`',
       'Example: `+sql`',
       'Example: `+title` and `+description`',
@@ -1430,6 +1436,10 @@ function api() {
       {
         title: '`getVikeConfig()`',
         url: '/getVikeConfig',
+      },
+      {
+        title: '`vike/runtime`',
+        url: '/vike-runtime',
       },
       {
         title: '`reactStrictMode`',

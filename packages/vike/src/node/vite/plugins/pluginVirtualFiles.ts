@@ -4,6 +4,8 @@ import type { Plugin, ResolvedConfig, HmrContext, ViteDevServer, ModuleNode, Mod
 import { normalizePath } from 'vite'
 import { generateVirtualFilePageEntry } from './pluginVirtualFiles/generateVirtualFilePageEntry.js'
 import { generateVirtualFileGlobalEntryWithOldDesign } from './pluginVirtualFiles/generateVirtualFileGlobalEntryWithOldDesign.js'
+import { generateVirtualFileGlobalEntry } from './pluginVirtualFiles/generateVirtualFileGlobalEntry.js'
+import { generateVirtualFileRuntime } from './pluginVirtualFiles/generateVirtualFileRuntime.js'
 import { escapeRegex } from '../../../utils/escapeRegex.js'
 import { isScriptFile } from '../../../utils/isScriptFile.js'
 import {
@@ -15,7 +17,7 @@ import {
 } from '../../../utils/virtualFileId.js'
 import { assert } from '../../../utils/assert.js'
 import { assertPosixPath } from '../../../utils/path.js'
-import { parseVirtualFileId } from '../../../shared-server-node/virtualFileId.js'
+import { generateVirtualFileId, parseVirtualFileId } from '../../../shared-server-node/virtualFileId.js'
 import { reloadVikeConfig, isV1Design, getVikeConfigInternalOptional } from '../shared/resolveVikeConfigInternal.js'
 import pc from '@brillout/picocolors'
 import { logConfigInfo } from '../shared/loggerDev.js'
@@ -27,6 +29,7 @@ import { debugFileChange, getVikeConfigError } from '../../../shared-server-node
 import '../assertEnvVite.js'
 
 // === Rolldown filter
+const runtimePublicId = 'vike/runtime'
 const filterRolldown = {
   id: {
     include: new RegExp(`^(${escapeRegex(virtualFileIdPrefix1)}|${escapeRegex(virtualFileIdPrefix2)})`),
@@ -38,6 +41,19 @@ const filterFunction = (id: string) => isVirtualFileId(id)
 function pluginVirtualFiles(): Plugin[] {
   let config: ResolvedConfig
   return [
+    {
+      name: 'vike:runtime',
+      enforce: 'pre',
+      resolveId: {
+        filter: { id: { include: new RegExp(`^${escapeRegex(runtimePublicId)}$`) } },
+        handler(id) {
+          assert(id === runtimePublicId)
+          return addVirtualFileIdPrefix(
+            generateVirtualFileId({ type: 'runtime', environmentName: this.environment.name }),
+          )
+        },
+      },
+    },
     {
       name: 'vike:pluginVirtualFiles',
       configResolved: {
@@ -77,11 +93,17 @@ function pluginVirtualFiles(): Plugin[] {
 
           const idParsed = parseVirtualFileId(id)
           if (idParsed) {
+            if (idParsed.type === 'runtime') {
+              return generateVirtualFileRuntime(idParsed.environmentName, isDev)
+            }
             if (idParsed.type === 'page-entry') {
               const code = await generateVirtualFilePageEntry(id, isDev)
               return code
             }
             if (idParsed.type === 'global-entry') {
+              if (idParsed.environmentName !== 'client' && idParsed.environmentName !== 'server') {
+                return generateVirtualFileGlobalEntry({ environmentName: idParsed.environmentName, isDev }, isDev, id)
+              }
               const code = await generateVirtualFileGlobalEntryWithOldDesign(
                 id,
                 options,

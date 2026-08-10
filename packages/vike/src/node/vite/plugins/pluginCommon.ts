@@ -70,9 +70,20 @@ function pluginCommon(vikeVitePluginOptions: unknown): Plugin[] {
     {
       name: pluginName,
       configResolved: {
-        handler(config) {
+        async handler(config) {
           assertViteRoot(config._rootResolvedEarly!, config)
           assertSingleInstance(config)
+          const vikeConfig = await getVikeConfigInternal()
+          vikeConfig._runtimeEnvironmentNames
+            .filter((name) => name !== 'client' && name !== 'server')
+            .forEach((name) => {
+              assertUsage(
+                !!config.environments[name],
+                `The runtime environment ${pc.cyan(JSON.stringify(name))} is used by ${pc.cyan(
+                  'meta.env',
+                )} but it doesn't exist in ${pc.cyan('config.environments')}`,
+              )
+            })
         },
       },
     },

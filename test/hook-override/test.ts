@@ -3,7 +3,7 @@ export { testRun as test }
 import { run, page, test, expect, getServerUrl, fetchHtml, expectLog, autoRetry } from '@brillout/test-e2e'
 import { ensureWasClientSideRouted, expectPageContextJsonRequest, testCounter } from '../utils'
 
-function testRun(cmd: 'pnpm run dev' | 'pnpm run preview') {
+function testRun(cmd: 'pnpm run dev' | 'pnpm run preview', alwaysFetchPageContextFromServer = false) {
   run(cmd)
 
   const isDev = cmd === 'pnpm run dev'
@@ -50,8 +50,9 @@ function testRun(cmd: 'pnpm run dev' | 'pnpm run preview') {
     await page.goto(getServerUrl() + '/')
     await testCounter()
     {
-      // because neither data() nor onBeforeRender() are server-only
-      const done = expectPageContextJsonRequest(false)
+      // because neither data() nor onBeforeRender() are server-only, unless
+      // alwaysFetchPageContextFromServer is enabled
+      const done = expectPageContextJsonRequest(alwaysFetchPageContextFromServer)
       await page.click('a[href="/page-4"]')
       await testCounter(1)
       await ensureWasClientSideRouted('/pages/index')
@@ -89,7 +90,7 @@ function testRun(cmd: 'pnpm run dev' | 'pnpm run preview') {
     expect(await page.textContent('body')).toContain('per-page data() was called: undefined')
     expect(await page.textContent('body')).toContain('per-page data() was called in env: undefined')
     {
-      const done = expectPageContextJsonRequest(false)
+      const done = expectPageContextJsonRequest(alwaysFetchPageContextFromServer)
       await page.click('a[href="/page-4"]')
       await testCounter(5)
       await ensureWasClientSideRouted('/pages/index')

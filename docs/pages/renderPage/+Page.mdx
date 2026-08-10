@@ -72,9 +72,10 @@ async function startServer() {
 
     const pageContext = await renderPage(pageContextInit)
 
-    const { body, statusCode, headers } = pageContext.httpResponse
+    const { statusCode, headers } = pageContext.httpResponse
     headers.forEach(([name, value]) => res.setHeader(name, value))
-    res.status(statusCode).send(body)
+    res.status(statusCode)
+    pageContext.httpResponse.pipe(res)
   })
 
   const port = 3000
@@ -83,13 +84,11 @@ async function startServer() {
 }
 ```
 
-The `pageContext.httpResponse.body` value is the HTML string returned by the
-<Link href="/onRenderHtml"><code>onRenderHtml()</code> hook</Link> with additional `<script>` and `<style>` tags
-automatically injected by Vike.
+The `pageContext.httpResponse.body` value can be used only when the response body is a string. By default, it is the HTML returned by the <Link href="/onRenderHtml"><code>onRenderHtml()</code> hook</Link> with additional `<script>` and `<style>` tags automatically injected by Vike. But a server hook, including `onRenderHtml()`, can set <Link href="/pageContext#response">`pageContext.response`</Link> to serve any media type. Its native `Response` body is exposed as a stream.
 
 > You can control where and what Vike injects using <Link href="/injectFilter" />.
 
-For HTML streams use `httpResponse.pipe()` instead of `pageContext.httpResponse.body`, see <Link href="/streaming" />.
+Use `httpResponse.pipe()` to support both string and streaming response bodies, see <Link href="/streaming" />.
 
 Optionally, you can use `pageContext.httpResponse.earlyHints` for adding early hints (`103 Early Hint`), see <Link href="/preloading#early-hints" />.
 
@@ -117,5 +116,6 @@ But, if you use Server-Side Rendering (SSR), then you need a production server a
 - <Link href="/injectFilter" />
 - <Link href="/preloading#early-hints" />
 - <Link href="/onRenderHtml" />
+- <Link href="/pageContext#response">`pageContext.response`</Link>
 - <Link href="/NODE_ENV" />
 - <Link href="/pageContext" />

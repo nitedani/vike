@@ -269,6 +269,7 @@ type OnRenderHtmlAsync = (pageContext: PageContextServer) => Promise<OnRenderHtm
  */
 type OnRenderHtmlSync = (pageContext: PageContextServer) => OnRenderHtmlReturn
 type OnRenderHtmlReturn =
+  | undefined
   | DocumentHtml
   | {
       injectFilter?: (assets: InjectFilterEntry[]) => void
@@ -402,6 +403,14 @@ type ConfigBuiltIn = {
    * https://vike.dev/passToClient
    */
   passToClient?: PassToClientPublic | ImportStringList
+
+  /** Always fetch `pageContext` from the server upon client-side navigation.
+   *
+   * https://vike.dev/alwaysFetchPageContextFromServer
+   *
+   * @default false
+   */
+  alwaysFetchPageContextFromServer?: boolean
 
   /** Hook called when page is rendered on the client-side.
    *
