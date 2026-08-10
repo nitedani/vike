@@ -258,7 +258,7 @@ async function renderPageServerEntryRecursive(
     assert(pageContextNominalPageBegin.pageId)
     objectAssign(pageContextNominalPageBegin, { is404: null })
   } else {
-    objectAssign(pageContextNominalPageBegin, { is404: true, abortReason: 'Page Not Found' })
+    objectAssign(pageContextNominalPageBegin, { is404: true })
     log404(pageContextNominalPageBegin)
     const errorPageId = getErrorPageId(
       pageContextNominalPageBegin._globalContext._pageFilesAll,
@@ -305,7 +305,6 @@ async function renderPageServerEntryRecursive_onError(
   objectAssign(pageContextErrorPageInit, {
     is404: false,
     errorWhileRendering: err as Error,
-    abortReason: err,
     routeParams: {} as Record<string, string>,
   })
 
@@ -489,7 +488,6 @@ function getPageContextHttpErrorFallback(err: unknown, pageContextBegin: PageCon
   const pageContextHttpErrorFallback = fork(pageContextBegin)
   objectAssign(pageContextHttpErrorFallback, {
     errorWhileRendering: err,
-    abortReason: err,
   })
   const httpResponse = createHttpResponseErrorFallback(pageContextBegin)
   objectAssign(pageContextHttpErrorFallback, { httpResponse })

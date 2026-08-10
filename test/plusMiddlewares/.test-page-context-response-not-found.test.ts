@@ -18,6 +18,5 @@ test('an error page encodes a missing route as custom content', async () => {
   expect(await response.json()).to.deep.equal({
     type: 'fallback',
     reason: 'not-found',
-    abortReason: 'Page Not Found',
   })
 })
