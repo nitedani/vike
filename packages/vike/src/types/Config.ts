@@ -270,6 +270,7 @@ type OnRenderHtmlAsync = (pageContext: PageContextServer) => Promise<OnRenderHtm
  */
 type OnRenderHtmlSync = (pageContext: PageContextServer) => OnRenderHtmlReturn
 type OnRenderHtmlReturn =
+  | undefined
   | DocumentHtml
   | {
       injectFilter?: (assets: InjectFilterEntry[]) => void

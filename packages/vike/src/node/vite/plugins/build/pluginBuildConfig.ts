@@ -1,6 +1,7 @@
 export { pluginBuildConfig }
 export { assertRollupInput }
 export { analyzeClientEntries }
+export { shouldInjectVikeBuildInputs }
 
 import { assert, setAssertOnBeforeLog, assertUsage } from '../../../../utils/assert.js'
 import { onSetupBuild } from '../../../../utils/assertSetup.js'
@@ -42,24 +43,7 @@ function pluginBuildConfig(): Plugin[] {
           handleAssetsManifest_alignCssTarget(config)
           onSetupBuild()
           assertRollupInput(config)
-          // Inject the entries per environment: Vite builds an environment from
-          // config.environments[name].build.rollupOptions.input. Writing only to the root
-          // config.build.rollupOptions.input merely happens to work while
-          // builder.sharedConfigBuild is false — Vite then re-resolves the whole config once per
-          // environment and aliases the root build onto that environment's — and is silently
-          // dropped when it's true, because the config is then shared and the root build belongs
-          // to no environment.
-          const entriesBySide = new Map<boolean, Record<string, string>>()
-          for (const [envName, envConfig] of Object.entries(config.environments)) {
-            const isServerSide = isViteServerSide_configEnvironment(envName, envConfig)
-            let entries = entriesBySide.get(isServerSide)
-            if (!entries) {
-              entries = await getEntries(config, isServerSide)
-              assert(Object.keys(entries).length > 0)
-              entriesBySide.set(isServerSide, entries)
-            }
-            envConfig.build.rollupOptions.input = injectRollupInputs(entries, envConfig.build.rollupOptions.input)
-          }
+          await injectEnvironmentEntries(config)
           addLogHook()
           handleAssetsManifest_assertUsageCssCodeSplit(config)
         },
@@ -81,6 +65,45 @@ function pluginBuildConfig(): Plugin[] {
   ]
 }
 
+async function injectEnvironmentEntries(config: ResolvedConfig) {
+  // With sharedConfigBuild, Vite reads inputs from each environment instead of the root build config.
+  const vikeConfig = await getVikeConfigInternal()
+  const entriesBySide = new Map<boolean, Record<string, string>>()
+  for (const [environmentName, environmentConfig] of Object.entries(config.environments)) {
+    if (!shouldInjectVikeBuildInputs(environmentName, vikeConfig._runtimeEnvironmentNames)) continue
+    const entries = await getEntriesForSide(
+      config,
+      isViteServerSide_configEnvironment(environmentName, environmentConfig),
+      entriesBySide,
+    )
+    assert(Object.keys(entries).length > 0)
+    environmentConfig.build.rollupOptions.input = injectRollupInputs(
+      entries,
+      environmentConfig.build.rollupOptions.input,
+    )
+  }
+}
+
+function shouldInjectVikeBuildInputs(environmentName: string, runtimeEnvironmentNames: string[]) {
+  return (
+    environmentName === 'client' || environmentName === 'server' || !runtimeEnvironmentNames.includes(environmentName)
+  )
+}
+
+async function getEntriesForSide(
+  config: ResolvedConfig,
+  isServerSide: boolean,
+  entriesBySide: Map<boolean, Record<string, string>>,
+) {
+  const entriesCached = entriesBySide.get(isServerSide)
+  if (entriesCached) return entriesCached
+
+  const entries = await getEntries(config, isServerSide)
+  assert(Object.keys(entries).length > 0)
+  entriesBySide.set(isServerSide, entries)
+  return entries
+}
+
 async function getEntries(config: ResolvedConfig, isServerSide: boolean): Promise<Record<string, string>> {
   const vikeConfig = await getVikeConfigInternal()
   const { _pageConfigs: pageConfigs } = vikeConfig
@@ -95,7 +118,7 @@ async function getEntries(config: ResolvedConfig, isServerSide: boolean): Promis
     'At least one page should be defined, see https://vike.dev/add',
   )
   if (isServerSide) {
-    const pageEntries = getPageEntries(pageConfigs)
+    const pageEntries = getPageEntries(pageConfigs, 'server')
     const entries = {
       ...pageFileEntries,
       // Ensure Rollup generates a bundle per page: https://github.com/vikejs/vike/issues/349#issuecomment-1166247275
@@ -123,10 +146,10 @@ async function getEntries(config: ResolvedConfig, isServerSide: boolean): Promis
     return entries
   }
 }
-function getPageEntries(pageConfigs: PageConfigBuildTime[]) {
+function getPageEntries(pageConfigs: PageConfigBuildTime[], environmentName: string) {
   const pageEntries: Record<string, string> = {}
   pageConfigs.forEach((pageConfig) => {
-    const { entryName, entryTarget } = getEntryFromPageConfig(pageConfig, false)
+    const { entryName, entryTarget } = getEntryFromPageConfig(pageConfig, environmentName)
     pageEntries[entryName] = entryTarget
   })
   return pageEntries
@@ -146,7 +169,7 @@ function analyzeClientEntries(pageConfigs: PageConfigBuildTime[], config: Resolv
     }
     {
       // Ensure Rollup generates a bundle per page: https://github.com/vikejs/vike/issues/349#issuecomment-1166247275
-      const { entryName, entryTarget, entryFilePath } = getEntryFromPageConfig(pageConfig, true)
+      const { entryName, entryTarget, entryFilePath } = getEntryFromPageConfig(pageConfig, 'client')
       clientEntries[entryName] = { entryTarget, entryFilePath }
     }
     {
@@ -218,9 +241,9 @@ function getEntryFromClientEntry(clientEntry: string, config: ResolvedConfig, ad
 
   return { entryName, entryTarget, entryFilePath: filePath }
 }
-function getEntryFromPageConfig(pageConfig: PageConfigBuildTime, isForClientSide: boolean) {
+function getEntryFromPageConfig(pageConfig: PageConfigBuildTime, environmentName: string) {
   let { pageId } = pageConfig
-  const entryTarget = generateVirtualFileId({ type: 'page-entry', pageId, isForClientSide })
+  const entryTarget = generateVirtualFileId({ type: 'page-entry', pageId, environmentName })
   let entryName = pageId
   // Avoid:
   // ```
