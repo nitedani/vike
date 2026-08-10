@@ -8,6 +8,7 @@ async function execHookDataAndOnBeforeRender(
   pageContext: {
     pageId: string
     _pageContextAlreadyProvidedByOnPrerenderHook?: true
+    response?: Response
   } & PageContextExecHookServer,
 ): Promise<void> {
   if (pageContext._pageContextAlreadyProvidedByOnPrerenderHook) {
@@ -22,10 +23,12 @@ async function execHookDataAndOnBeforeRender(
       data: dataHook.hookReturn,
     }
     Object.assign(pageContext, pageContextFromHook)
+    if (pageContext.response !== undefined) return
 
     // Execute +onData
     if (!pageContext.isClientSideNavigation) {
       await execHookServer('onData', pageContext)
+      if (pageContext.response !== undefined) return
     }
   }
 

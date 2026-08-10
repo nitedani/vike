@@ -25,6 +25,7 @@ function createPageContextServer(
   globalContext: GlobalContextServerInternal,
   args: {
     requestId: number
+    request?: Request
   } & (
     | {
         isPrerendering: true
@@ -48,6 +49,7 @@ function createPageContextServer(
     _pageContextInit: pageContextInit,
     _urlHandler: args.isPrerendering ? null : args.urlHandler,
     isClientSideNavigation: args.isPrerendering ? false : args.isClientSideNavigation,
+    request: args.request,
   })
 
   objectAssign(pageContext, globalContext._globalConfigPublic)
@@ -65,6 +67,8 @@ function createPageContextServer(
         !('headers' in pageContextInit),
         "You're defining pageContextInit.headersOriginal as well as pageContextInit.headers but you should only define pageContextInit.headersOriginal instead, see https://vike.dev/headers",
       )
+    } else if (pageContextInit.request) {
+      headers = normalizeHeaders(pageContextInit.request.headers)
     } else if (pageContextInit.headers) {
       headers = pageContextInit.headers as Record<string, string>
       // TO-DO/next-major-release: remove

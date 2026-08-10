@@ -135,6 +135,7 @@ type PageContextBuiltInCommon<Data> = PageContextConfig & {
 
   /**
    * The reason why the original page was aborted. Usually used for showing a custom message on the error page.
+   * Vike also sets it when no page matches and when rendering fails.
    *
    * https://vike.dev/render
    * https://vike.dev/pageContext#abortReason
@@ -197,6 +198,7 @@ type PageContextInit = {
    * https://vike.dev/pageContext#headersOriginal
    */
   headersOriginal?: unknown // We set it to the type `unknown` instead of the type `HeadersInit` because `HeadersInit` isn't accurate: for example, `http.IncomingHttpHeaders` is a valid input for `new Headers()` but doesn't match the `HeadersInit` init.
+  request?: Request
   /** @deprecated Set `pageContextInit.urlOriginal` instead  */ // TO-DO/next-major-release: remove
   url?: string
 }
@@ -206,7 +208,6 @@ type PageContextInitInternal = PageContextInit & {
     req: IncomingMessage
     res: ServerResponse
   }
-  _reqWeb?: Request
 }
 
 type PageContextBuiltInServer<Data> = PageContextBuiltInCommon<Data> &
@@ -221,6 +222,23 @@ type PageContextBuiltInServer<Data> = PageContextBuiltInCommon<Data> &
      * https://vike.dev/pageContext#headers
      */
     headers: Record<string, string> | null
+
+    /**
+     * The Web `Request` for this render. Its body is one-shot and shared by server hooks; Vike doesn't consume it.
+     *
+     * Fetch integrations pass through the incoming request and Vike's development server adapts the Node.js request.
+     * It is `undefined` when `renderPage()` is called without a request.
+     */
+    request?: Request
+
+    /** An HTTP response set by a server hook. */
+    response?: Response
+
+    /**
+     * The response body set by `onRenderHtml()`. Upon pre-rendering, it becomes the generated file's content.
+     * Set `headersResponse` to define response headers such as `Content-Type`.
+     */
+    content?: string | ReadableStream<Uint8Array>
 
     /**
      * Whether the environment is the client-side:
