@@ -197,7 +197,7 @@ async function execHookOnBeforeRender(pageContext: PageContextExecHookClient) {
 //    ```
 // - We can show a warning to users when the pageContextInit keys aren't always the same. (We didn't implement the waning yet because it would require a new doc page https://vike.dev/pageContextInit#avoid-conditional-properties
 // - Workaround cannot be made completely reliable because the workaround assumes that passToClient is always the same, but the user may set a different passToClient value for another page
-// - Alternatively, we could define a new config `alwaysFetchPageContextFromServer: boolean`
+// - Users can bypass the heuristic with `alwaysFetchPageContextFromServer: true`
 function setPageContextInitIsPassedToClient(pageContext: Record<string, unknown>) {
   if (pageContext[pageContextInitIsPassedToClient]) {
     globalObject.pageContextInitIsPassedToClient = true
@@ -218,7 +218,21 @@ async function hasPageContextServer(pageContext: {
     // data() hooks didn't exist in the V0.4 design
     return hasOnBeforeRenderServerSideOnlyHook
   }
-  return !!globalObject.pageContextInitIsPassedToClient || hasServerOnlyHook(pageContext)
+  return (
+    alwaysFetchPageContextFromServer(pageContext) ||
+    !!globalObject.pageContextInitIsPassedToClient ||
+    hasServerOnlyHook(pageContext)
+  )
+}
+
+function alwaysFetchPageContextFromServer(pageContext: {
+  pageId: string
+  _globalContext: GlobalContextClientInternal
+}) {
+  const pageConfig = getPageConfig(pageContext.pageId, pageContext._globalContext._pageConfigs)
+  const val = getConfigValueRuntime(pageConfig, 'alwaysFetchPageContextFromServer')?.value
+  assert(val === undefined || val === true || val === false)
+  return val === true
 }
 
 function hasServerOnlyHook(pageContext: {

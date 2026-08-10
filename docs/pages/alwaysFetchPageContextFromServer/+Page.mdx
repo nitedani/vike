@@ -1,0 +1,36 @@
+import { Link } from '@brillout/docpress'
+import { ConfigSpec } from '../../components'
+
+<ConfigSpec
+  env="client"
+  default={<code>false</code>}
+  isTypeOneLiner
+>
+`boolean {:ts}`
+</ConfigSpec>
+
+Set `alwaysFetchPageContextFromServer` to `true` when a <Link href="/passToClient"><code>passToClient</code></Link> value is produced only on the server-side, but not by a server-only `guard()`, `data()`, or `onBeforeRender()` hook.
+
+```ts
+// /pages/+config.ts
+
+import type { Config } from 'vike/types'
+
+export default {
+  passToClient: ['someServerValue'],
+  alwaysFetchPageContextFromServer: true,
+} satisfies Config
+```
+
+By default, Vike fetches server-side `pageContext` values upon client-side navigation only when it detects that they're needed. Vike cannot always infer this from `passToClient`, for example when a Vike extension produces the value.
+
+Enabling `alwaysFetchPageContextFromServer` makes Vike fetch the page's <Link href="/pageContext.json"><code>pageContext</code> data</Link> upon every client-side navigation to the configured page.
+
+> This setting requires <Link href="/client-routing">Client Routing</Link>.
+
+
+## See also
+
+- <Link href="/passToClient" />
+- <Link href="/pageContext.json" />
+- <Link href="/client-routing" />
