@@ -14,9 +14,11 @@ Hook called right after the <Link href="/Page">the `+Page` component</Link> is r
 
 It's called upon rendering the first page the user visits. It isn't called upon page navigation (since pages aren't rendered to HTML upon page navigation).
 
-It's called regardless of whether <Link href="/ssr">SSR</Link> is disabled. (The first page the user visits is always rendered to HTML: when SSR is disabled it's just an HTML shell that doesn't contain the content of the page.)
+It isn't called if an earlier server hook sets <Link href="/pageContext#response">`pageContext.response`</Link> instead of rendering HTML.
 
-For <Link href="/pre-rendering">pre-rendered pages</Link> it's called at build-time. (Since the HTML of pre-rendered pages are generated at build-time.)
+It's called regardless of whether <Link href="/ssr">SSR</Link> is disabled. (For HTML output, the first page the user visits is always rendered to HTML: when SSR is disabled it's just an HTML shell that doesn't contain the content of the page.)
+
+For <Link href="/pre-rendering">pre-rendered HTML pages</Link> it's called at build-time. (Since their HTML is generated at build-time.)
 
 
 
