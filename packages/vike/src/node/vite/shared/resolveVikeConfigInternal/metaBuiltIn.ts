@@ -159,6 +159,10 @@ const metaBuiltIn: ConfigDefinitionsBuiltIn = {
     env: { server: true },
     cumulative: true,
   },
+  alwaysFetchPageContextFromServer: {
+    env: { client: true },
+    eager: true,
+  },
   route: {
     env: {
       server: true,

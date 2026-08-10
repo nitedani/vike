@@ -699,6 +699,11 @@ const headings = [
   },
   {
     level: 2,
+    title: '`+alwaysFetchPageContextFromServer`',
+    url: '/alwaysFetchPageContextFromServer',
+  },
+  {
+    level: 2,
     title: '`+headersResponse`',
     url: '/headersResponse',
   },

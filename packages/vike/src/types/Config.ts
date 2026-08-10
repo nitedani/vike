@@ -404,6 +404,14 @@ type ConfigBuiltIn = {
    */
   passToClient?: PassToClientPublic | ImportStringList
 
+  /** Always fetch `pageContext` from the server upon client-side navigation.
+   *
+   * https://vike.dev/alwaysFetchPageContextFromServer
+   *
+   * @default false
+   */
+  alwaysFetchPageContextFromServer?: boolean
+
   /** Hook called when page is rendered on the client-side.
    *
    * https://vike.dev/onRenderClient
