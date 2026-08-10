@@ -13,12 +13,7 @@ import { objectAssign } from '../../../utils/objectAssign.js'
 import { updateType } from '../../../utils/updateType.js'
 import { getPageContextClientSerialized } from './html/serializeContext.js'
 import { type PageContextUrlInternal } from '../../../shared-server-client/getPageContextUrlComputed.js'
-import {
-  createHttpResponsePage,
-  createHttpResponsePageContent,
-  createHttpResponsePageJson,
-  HttpResponse,
-} from './createHttpResponse.js'
+import { createHttpResponsePage, createHttpResponsePageJson, HttpResponse } from './createHttpResponse.js'
 import {
   loadPageConfigsLazyServerSide,
   type PageContext_loadPageConfigsLazyServerSide,
@@ -46,7 +41,6 @@ type PageContextRender = {
   errorWhileRendering: null | Error
   _requestId: number
   response?: Response
-  content?: string | ReadableStream<Uint8Array>
 } & PageContextCreatedServer &
   PageContextBegin &
   PageContextUrlInternal &
@@ -68,7 +62,6 @@ async function renderPageServerAfterRoute<PageContext extends PageContextRender>
   )
 
   updateType(pageContext, await loadPageConfigsLazyServerSide(pageContext))
-  assertContentUnset(pageContext)
   {
     const pageContextWithResponse = resolvePageContextResponse(pageContext)
     if (pageContextWithResponse) return pageContextWithResponse
@@ -76,7 +69,6 @@ async function renderPageServerAfterRoute<PageContext extends PageContextRender>
 
   if (!isError) {
     await execHookGuard(pageContext, (pageContext) => getPageContextPublicServer(pageContext))
-    assertContentUnset(pageContext)
     const pageContextWithResponse = resolvePageContextResponse(pageContext)
     if (pageContextWithResponse) return pageContextWithResponse
   }
@@ -93,7 +85,6 @@ async function renderPageServerAfterRoute<PageContext extends PageContextRender>
     }
   }
 
-  assertContentUnset(pageContext)
   {
     const pageContextWithResponse = resolvePageContextResponse(pageContext)
     if (pageContextWithResponse) return pageContextWithResponse
@@ -118,7 +109,6 @@ async function renderPageServerResponse<PageContext extends PageContextRender & 
   pageContext: PageContext,
   allowHtmlResponse = true,
 ): Promise<(PageContext & PageContextAfterRender) | null> {
-  assertContentUnset(pageContext)
   {
     const pageContextWithResponse = resolvePageContextResponse(pageContext)
     if (pageContextWithResponse) return pageContextWithResponse
@@ -129,21 +119,11 @@ async function renderPageServerResponse<PageContext extends PageContextRender & 
     const pageContextWithResponse = resolvePageContextResponse(pageContext)
     if (pageContextWithResponse) return pageContextWithResponse
   }
-  if (pageContext.content !== undefined) {
-    assert(htmlRender === null)
-    const httpResponse = await createHttpResponsePageContent(pageContext.content, pageContext)
-    objectAssign(pageContext, { httpResponse })
-    return pageContext
-  }
   assert(htmlRender !== null)
   if (!allowHtmlResponse) return null
   const httpResponse = await createHttpResponsePage(htmlRender, renderHook, pageContext)
   objectAssign(pageContext, { httpResponse })
   return pageContext
-}
-
-function assertContentUnset(pageContext: { content?: unknown }) {
-  assertUsage(pageContext.content === undefined, 'pageContext.content can only be set by onRenderHtml()')
 }
 
 async function prerenderPage(pageContext: Parameters<typeof prerenderPageEntry>[0]) {
@@ -170,7 +150,6 @@ async function prerenderPageEntry(
       _pageContextAlreadyProvidedByOnPrerenderHook?: true
       is404: boolean
       response?: Response
-      content?: string | ReadableStream<Uint8Array>
     },
 ) {
   objectAssign(pageContext, {
@@ -184,25 +163,20 @@ async function prerenderPageEntry(
   */
 
   await execHookDataAndOnBeforeRender(pageContext)
-  assertUsage(
-    pageContext.response === undefined,
-    'Cannot pre-render a page whose hook sets pageContext.response: set pageContext.content instead',
-  )
-  assertContentUnset(pageContext)
+  assertUsage(pageContext.response === undefined, 'Cannot pre-render a page whose hook sets pageContext.response')
 
   const { htmlRender, renderHook } = await execHookOnRenderHtml(pageContext)
   assertUsage(
     pageContext.response === undefined,
-    'Cannot pre-render a page whose onRenderHtml() hook sets pageContext.response: set pageContext.content instead',
+    'Cannot pre-render a page whose onRenderHtml() hook sets pageContext.response',
   )
-  const renderedContent = pageContext.content ?? htmlRender
   assertUsage(
-    renderedContent !== null,
+    htmlRender !== null,
     `Cannot pre-render ${pc.cyan(pageContext.urlOriginal)} because the ${renderHook.hookName}() hook defined by ${
       renderHook.hookFilePath
     } didn't return content.`,
   )
-  const documentHtml = await getHtmlString(renderedContent)
+  const documentHtml = await getHtmlString(htmlRender)
   assert(typeof documentHtml === 'string')
   if (!pageContext._usesClientRouter) {
     return { documentHtml, pageContextSerialized: null, pageContext }

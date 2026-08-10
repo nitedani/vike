@@ -135,7 +135,6 @@ type PageContextBuiltInCommon<Data> = PageContextConfig & {
 
   /**
    * The reason why the original page was aborted. Usually used for showing a custom message on the error page.
-   * Vike also sets it when no page matches and when rendering fails.
    *
    * https://vike.dev/render
    * https://vike.dev/pageContext#abortReason
@@ -233,12 +232,6 @@ type PageContextBuiltInServer<Data> = PageContextBuiltInCommon<Data> &
 
     /** An HTTP response set by a server hook. */
     response?: Response
-
-    /**
-     * The response body set by `onRenderHtml()`. Upon pre-rendering, it becomes the generated file's content.
-     * Set `headersResponse` to define response headers such as `Content-Type`.
-     */
-    content?: string | ReadableStream<Uint8Array>
 
     /**
      * Whether the environment is the client-side:

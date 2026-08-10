@@ -16,6 +16,7 @@ function onRenderHtml(pageContext: PageContextServer) {
   ) {
     return escapeInject`<!doctype html><p>HTML fallback</p>`
   }
-  pageContext.headersResponse.set('Content-Type', 'application/x-vike-test')
-  pageContext.content = JSON.stringify({ redirect: abort._urlRedirect!.url })
+  pageContext.response = new Response(JSON.stringify({ redirect: abort._urlRedirect!.url }), {
+    headers: { 'Content-Type': 'application/x-vike-test' },
+  })
 }

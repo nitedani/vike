@@ -180,8 +180,6 @@ function getViteCliArgs(): null | { root: string | undefined; configFile: string
     assert(options.config === undefined || typeof options.config === 'string')
     result = { root, configFile: options.config }
   }
-  // We only read --config here: every other option belongs to Vite, and rejecting unknown ones
-  // would make every Vite CLI option fail.
   cli.command('[root]', desc).allowUnknownOptions().alias('serve').alias('dev').action(setResult)
   cli.command('build [root]', desc).allowUnknownOptions().action(setResult)
   cli.command('optimize [root]', desc).allowUnknownOptions().action(setResult)

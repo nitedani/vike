@@ -1,5 +1,4 @@
 export { createHttpResponsePage }
-export { createHttpResponsePageContent }
 export { getPageStatusCode }
 export { createHttpResponsePageJson }
 export { createHttpResponseErrorFallback }
@@ -13,7 +12,7 @@ export type { HttpResponse }
 
 import type { GetPageAssets } from './getPageAssets.js'
 import { escapeHtml } from '../../../utils/escapeHtml.js'
-import { assert, assertUsage, assertWarning } from '../../../utils/assert.js'
+import { assert, assertWarning } from '../../../utils/assert.js'
 import type { HtmlRender } from './html/renderHtml.js'
 import { getErrorPageId, isErrorPage } from '../../../shared-server-client/error-page.js'
 import type { RenderHook } from './execHookOnRenderHtml.js'
@@ -25,7 +24,6 @@ import type { PageContextBegin } from '../renderPageServer.js'
 import type { GlobalContextServerInternal } from '../globalContext.js'
 import { headersToEntries, resolveHeadersResponseFinal } from './headersResponse.js'
 import { stringify } from '@brillout/json-serializer/stringify'
-import { isStream } from './html/stream.js'
 import '../../assertEnvServer.js'
 
 type HttpResponse = {
@@ -66,22 +64,6 @@ async function createHttpResponsePage(
   const earlyHints = getEarlyHints(await pageContext.__getPageAssets())
   const headers = resolveHeadersResponseFinal(pageContext, statusCode)
   return createHttpResponse(statusCode, contentTypeHtml, headers, htmlRender, earlyHints, renderHook)
-}
-
-async function createHttpResponsePageContent(
-  content: HtmlRender,
-  pageContext: PageContextResponse & {
-    __getPageAssets: GetPageAssets
-  },
-): Promise<HttpResponse> {
-  assertUsage(
-    typeof content === 'string' || isStream(content),
-    'pageContext.content should be a string or a readable stream',
-  )
-  const statusCode = getPageStatusCode(pageContext)
-  const earlyHints = getEarlyHints(await pageContext.__getPageAssets())
-  const headers = resolveHeadersResponseFinal(pageContext, statusCode)
-  return createHttpResponseCommon(statusCode, headers, content, earlyHints)
 }
 
 function getPageStatusCode(pageContext: PageContextResponse): StatusCode {
