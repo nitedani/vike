@@ -50,9 +50,9 @@ async function onRenderHtml(pageContext: PageContextServer){
 Where `pageContext.Page` is the <Link href="/Page">`+Page` value</Link> of the page that is being rendered.
 
 
-## Custom content
+## Custom response
 
-Set <Link href="/pageContext#content">`pageContext.content`</Link> to serve content other than HTML from a page-scoped `+onRenderHtml` hook:
+Set <Link href="/pageContext#response">`pageContext.response`</Link> to serve content other than HTML from a page-scoped `+onRenderHtml` hook:
 
 ```ts
 // pages/feed/+onRenderHtml.ts
@@ -62,19 +62,16 @@ export default onRenderHtml
 import type { PageContextServer } from 'vike/types'
 
 function onRenderHtml(pageContext: PageContextServer) {
-  const mode = pageContext.isPrerendering ? 'prerendered' : 'server-rendered'
-  pageContext.headersResponse.set('Content-Type', 'application/atom+xml;charset=utf-8')
-  pageContext.content = `<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Vike Feed</title><id>https://example.org/feed.atom</id><category term="${mode}"/></feed>`
+  pageContext.response = new Response(
+    '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Vike Feed</title><id>https://example.org/feed.atom</id><category term="server-rendered"/></feed>',
+    { headers: { 'Content-Type': 'application/atom+xml;charset=utf-8' } },
+  )
 }
 ```
 
 The example above is covered by <RepoLink path="/test/pageContextResponse/atom/+onRenderHtml.ts" />.
 
-`pageContext.content` can be a string or a [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream). It becomes the HTTP response body when serving and the generated file's content when <Link href="/pre-rendering">pre-rendering</Link>. Vike doesn't add a default HTML `Content-Type`: set it with <Link href="/pageContext#headersResponse">`pageContext.headersResponse`</Link>.
-
-Don't return a value when setting `pageContext.content`, and don't set it together with <Link href="/pageContext#response">`pageContext.response`</Link>.
-
-> A pre-rendered non-HTML route cannot carry its own content type. Vike writes its content to `dist/client/<route>/index.html` without recording response headers, so a static host serves it as `text/html;charset=utf-8` unless configured otherwise.
+A native `Response` defines the entire HTTP response, including its status, headers, and body. Don't return a value when setting `pageContext.response`.
 
 
 ## See also

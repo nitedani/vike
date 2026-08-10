@@ -84,7 +84,7 @@ async function startServer() {
 }
 ```
 
-The `pageContext.httpResponse.body` value can be used only when the response body is a string. By default, it is the HTML returned by the <Link href="/onRenderHtml"><code>onRenderHtml()</code> hook</Link> with additional `<script>` and `<style>` tags automatically injected by Vike. But a server hook can set <Link href="/pageContext#response">`pageContext.response`</Link>, or `onRenderHtml()` can set <Link href="/pageContext#content">`pageContext.content`</Link>, to serve any media type. A native `Response` body or streaming `pageContext.content` is exposed as a stream.
+The `pageContext.httpResponse.body` value can be used only when the response body is a string. By default, it is the HTML returned by the <Link href="/onRenderHtml"><code>onRenderHtml()</code> hook</Link> with additional `<script>` and `<style>` tags automatically injected by Vike. But a server hook, including `onRenderHtml()`, can set <Link href="/pageContext#response">`pageContext.response`</Link> to serve any media type. Its native `Response` body is exposed as a stream.
 
 > You can control where and what Vike injects using <Link href="/injectFilter" />.
 

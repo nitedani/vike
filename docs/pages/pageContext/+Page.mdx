@@ -164,15 +164,7 @@ Vike doesn't parse or consume the request body. A request body can be consumed o
 
 A native [`Response`](https://developer.mozilla.org/en-US/docs/Web/API/Response) that a server hook can set to override the entire HTTP response, including its status, headers, and body.
 
-An intentionally empty body stays empty: `new Response(null, { status: 204 })` doesn't receive an HTML fallback. `pageContext.response` isn't supported while <Link href="/pre-rendering">pre-rendering</Link>; set <Link href="#content" noWarning>`pageContext.content`</Link> from `onRenderHtml()` instead.
-
-<Prop name="content" />
-
-A string or [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) set by the page-scoped <Link href="/onRenderHtml">`onRenderHtml()`</Link> hook. It becomes the HTTP response body when serving and the generated file's content when pre-rendering.
-
-Set <Link href="#headersResponse" noWarning>`pageContext.headersResponse`</Link> to define headers such as `Content-Type`. Vike doesn't add a default HTML content type when `pageContext.content` is set.
-
-> A pre-rendered non-HTML route cannot carry its own content type. Vike writes its content to `dist/client/<route>/index.html` without recording response headers, so a static host serves it as `text/html;charset=utf-8` unless configured otherwise.
+An intentionally empty body stays empty: `new Response(null, { status: 204 })` doesn't receive an HTML fallback. `pageContext.response` isn't supported while <Link href="/pre-rendering">pre-rendering</Link>.
 
 <Prop name="headersResponse" />
 
