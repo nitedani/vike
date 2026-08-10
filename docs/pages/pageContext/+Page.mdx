@@ -152,6 +152,28 @@ The headers of the HTTP Request. As a string object (`Record<string, string>`) n
 
 The headers of the HTTP Request. The original object provided by the server, see <Link href="/headers"/>.
 
+<Prop name="request" />
+
+The Web [`Request`](https://developer.mozilla.org/en-US/docs/Web/API/Request) for the current server render, when one exists.
+
+It is available when using <Link href="/server">`+server`</Link> and in Vike's development server. When calling <Link href="/renderPage">`renderPage()`</Link> yourself, it is `undefined` unless you provide `pageContextInit.request`.
+
+Vike doesn't parse or consume the request body. A request body can be consumed only once: after a server hook reads it, subsequent hooks cannot read it again. When a request exists and middleware is configured, Vike clones it before dispatching it so that middleware cannot consume the hook's body.
+
+<Prop name="response" />
+
+A native [`Response`](https://developer.mozilla.org/en-US/docs/Web/API/Response) that a server hook can set to override the entire HTTP response, including its status, headers, and body.
+
+An intentionally empty body stays empty: `new Response(null, { status: 204 })` doesn't receive an HTML fallback. `pageContext.response` isn't supported while <Link href="/pre-rendering">pre-rendering</Link>; set <Link href="#content" noWarning>`pageContext.content`</Link> from `onRenderHtml()` instead.
+
+<Prop name="content" />
+
+A string or [`ReadableStream`](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) set by the page-scoped <Link href="/onRenderHtml">`onRenderHtml()`</Link> hook. It becomes the HTTP response body when serving and the generated file's content when pre-rendering.
+
+Set <Link href="#headersResponse" noWarning>`pageContext.headersResponse`</Link> to define headers such as `Content-Type`. Vike doesn't add a default HTML content type when `pageContext.content` is set.
+
+> A pre-rendered non-HTML route cannot carry its own content type. Vike writes its content to `dist/client/<route>/index.html` without recording response headers, so a static host serves it as `text/html;charset=utf-8` unless configured otherwise.
+
 <Prop name="headersResponse" />
 
 The headers of the HTTP Response, see <Link href="/headersResponse"/>.
@@ -323,7 +345,7 @@ Whether the page was navigated by the client-side router.
 
 <Prop name="abortReason" />
 
-Set by <Link href="/render"><code>throw render()</code></Link> and used by the <Link href="/error-page">error page</Link>.
+The reason normal rendering was aborted. It is the caller-provided reason for <Link href="/render"><code>throw render()</code></Link>, `'Page Not Found'` when no route matches, or the thrown error when rendering fails. It is also used by the <Link href="/error-page">error page</Link>.
 
 <Prop name="abortStatusCode" />
 
@@ -669,7 +691,7 @@ The lifecycle of the `pageContext` object is straightforward on the client and s
 
 ### Server
 
-On the server-side, a new `pageContext` object is created whenever a page is rendered to HTML. The `pageContext` object is discarded after the HTML is sent to the client. (But `pageContext` properties sent to the client via <Link href="/passToClient">passToClient</Link> are preserved on the client-side.)
+On the server-side, a new `pageContext` object is created for every render. The `pageContext` object is discarded after the HTTP response is sent to the client. (But `pageContext` properties sent to the client via <Link href="/passToClient">passToClient</Link> are preserved on the client-side.)
 
 ### Client
 
@@ -683,7 +705,7 @@ If data is fetched on the server-side, then some `pageContext` properties are fe
 
 ### Pre-rendering
 
-Upon <Link href="/pre-rendering">pre-rendering a page</Link>, the `pageContext` object used for pre-rendering the page to HTML is preserved and saved twice at:
+Upon <Link href="/pre-rendering">pre-rendering an HTML page</Link>, the `pageContext` object used for pre-rendering is preserved and saved twice at:
  - `dist/client/${urlOfThePage}/index.pageContext.json` (see <Link href="/pageContext.json" />)
  - `dist/client/${urlOfThePage}/index.html` (see `<script id="vike_pageContext">`)
 

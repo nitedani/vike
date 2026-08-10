@@ -1,0 +1,32 @@
+import { Link } from '@brillout/docpress'
+import { ConfigSpec } from '../../components'
+
+<ConfigSpec
+  env="Vite environment"
+  global={null}
+/>
+
+The `vike/runtime` module exposes information and page configuration for the current Vite environment.
+
+```ts
+import { environmentName, loadPageConfig } from 'vike/runtime'
+
+console.log(environmentName)
+
+const { config } = await loadPageConfig('/pages/index')
+```
+
+`environmentName` is the current Vite environment's name.
+
+`loadPageConfig(pageId)` loads the page's <Link href="/config">config values</Link> that are available in the current environment. It throws when `pageId` is unknown.
+
+Vike doesn't add Rollup inputs to custom runtime environments. Instead, `loadPageConfig()` establishes their page graph lazily, so their page entries are emitted as dynamic entries in the manifest.
+
+> `vike/runtime` can be imported only from code processed inside a Vite environment.
+
+
+## See also
+
+- <Link href="/meta#named-runtime-environments">`meta.env` named runtime environments</Link>
+- <Link href="/config" />
+- [Vite > Environment API](https://vite.dev/guide/api-environment)
