@@ -11,13 +11,14 @@ export { reloadVikeConfig }
 export { isV1Design }
 export { getConfVal }
 export { getConfigDefinitionOptional }
+export { getConfigEnvValue }
+export { resolveRuntimeEnvironmentNamesFromSources }
 export { getVikeConfigFromCliOrEnv }
 export { EARLY_SETTINGS }
 export type { VikeConfigInternal }
 export type { PageConfigBuildTimeBeforeComputed }
 
 import { deepEqual } from '../../../utils/deepEqual.js'
-import { assertKeys } from '../../../utils/assertKeys.js'
 import { assertIsNotProductionRuntime } from '../../../utils/assertSetup.js'
 import { getMostSimilar } from '../../../utils/getMostSimilar.js'
 import { objectEntries } from '../../../utils/objectEntries.js'
@@ -77,7 +78,7 @@ import { loadPointerImport, loadValueFile } from './resolveVikeConfigInternal/lo
 import { resolvePointerImport } from './resolveVikeConfigInternal/resolvePointerImport.js'
 import { parsePointerImportData } from './resolveVikeConfigInternal/pointerImports.js'
 import { getFilePathResolved } from './getFilePath.js'
-import type { FilePath } from '../../../types/FilePath.js'
+import type { FilePath, FilePathResolved } from '../../../types/FilePath.js'
 import { getConfigValueBuildTime } from '../../../shared-server-client/page-configs/getConfigValueBuildTime.js'
 import {
   resolveGlobalConfigPublic,
@@ -128,6 +129,7 @@ type VikeConfigInternal = GlobalConfigPublic & {
   _pageConfigGlobal: PageConfigGlobalBuildTime
   _vikeConfigDependencies: Set<string>
   _extensions: PlusFile[]
+  _runtimeEnvironmentNames: string[]
   prerenderContext: PrerenderContext
 }
 
@@ -322,7 +324,7 @@ async function resolveVikeConfigInternal(
 
   const configDefinitionsResolved = await resolveConfigDefinitions(plusFilesByLocationId, userRootDir, esbuildCache)
 
-  const { pageConfigGlobal, pageConfigs } = getPageConfigsBuildTime(
+  const { pageConfigGlobal, pageConfigs, runtimeEnvironmentNames } = getPageConfigsBuildTime(
     configDefinitionsResolved,
     plusFilesByLocationId,
     userRootDir,
@@ -355,6 +357,7 @@ async function resolveVikeConfigInternal(
     _pageConfigGlobal: pageConfigGlobal,
     _vikeConfigDependencies: esbuildCache.vikeConfigDependencies,
     _extensions,
+    _runtimeEnvironmentNames: runtimeEnvironmentNames,
   }
   globalObject.vikeConfigSync = vikeConfig
 
@@ -471,15 +474,19 @@ function getPageConfigsBuildTime(
     configDefinitions: configDefinitionsResolved.configDefinitionsGlobal,
     configValueSources: {},
   }
+  const plusFilesGlobal = Object.values(plusFilesByLocationId).flat()
+  const runtimeEnvironmentNames = resolveRuntimeEnvironmentNames(configDefinitionsResolved)
+
   objectEntries(configDefinitionsResolved.configDefinitionsGlobal).forEach(([configName, configDef]) => {
     const sources = resolveConfigValueSources(
       configName,
       configDef,
       // We use `plusFilesByLocationId` in order to allow non-global Vike extensions to create global configs, and to set the value of global configs such as `+vite` (enabling Vike extensions to add Vite plugins).
-      Object.values(plusFilesByLocationId).flat(),
+      plusFilesGlobal,
       userRootDir,
       true,
       plusFilesByLocationId,
+      runtimeEnvironmentNames,
     )
     if (sources.length === 0) return
     pageConfigGlobal.configValueSources[configName] = sources
@@ -502,13 +509,53 @@ function getPageConfigsBuildTime(
         configDefinitions,
         plusFilesByLocationId,
         userRootDir,
+        runtimeEnvironmentNames,
       ),
     )
   // Pages defined programmatically via +pages
-  pageConfigs.push(...getProgrammaticPageConfigs(configDefinitionsResolved, plusFilesByLocationId, userRootDir))
+  pageConfigs.push(
+    ...getProgrammaticPageConfigs(
+      configDefinitionsResolved,
+      plusFilesByLocationId,
+      userRootDir,
+      runtimeEnvironmentNames,
+    ),
+  )
   assertPageConfigs(pageConfigs)
 
-  return { pageConfigs, pageConfigGlobal }
+  const runtimeEnvironmentNamesWithEffects = resolveRuntimeEnvironmentNamesFromSources(
+    runtimeEnvironmentNames,
+    pageConfigGlobal.configValueSources,
+    ...pageConfigs.map(({ configValueSources }) => configValueSources),
+  )
+  return { pageConfigs, pageConfigGlobal, runtimeEnvironmentNames: runtimeEnvironmentNamesWithEffects }
+}
+
+function resolveRuntimeEnvironmentNames(configDefinitionsResolved: ConfigDefinitionsResolved) {
+  const configDefinitions = [
+    configDefinitionsResolved.configDefinitionsGlobal,
+    ...Object.values(configDefinitionsResolved.configDefinitionsLocal).map(
+      ({ configDefinitions }) => configDefinitions,
+    ),
+  ]
+  return resolveRuntimeEnvironmentNamesFromConfigEnvs(
+    configDefinitions.flatMap((definitions) => Object.values(definitions).map(({ env }) => env)),
+  )
+}
+
+function resolveRuntimeEnvironmentNamesFromSources(
+  runtimeEnvironmentNames: string[],
+  ...configValueSourcesAll: ConfigValueSources[]
+) {
+  const configEnvs = configValueSourcesAll.flatMap((configValueSources) =>
+    Object.values(configValueSources).flatMap((sources) => sources.map(({ configEnv }) => configEnv)),
+  )
+  return unique([...runtimeEnvironmentNames, ...resolveRuntimeEnvironmentNamesFromConfigEnvs(configEnvs)])
+}
+
+function resolveRuntimeEnvironmentNamesFromConfigEnvs(configEnvs: ConfigEnv[]) {
+  const nonRuntimeKeys = new Set(['config', 'production', 'eager'])
+  return unique(configEnvs.flatMap((env) => Object.keys(env).filter((name) => !nonRuntimeKeys.has(name))))
 }
 
 function resolvePageConfigBuildTime(
@@ -518,6 +565,7 @@ function resolvePageConfigBuildTime(
   configDefinitionsLocal: ConfigDefinitionsInternal,
   plusFilesByLocationId: PlusFilesByLocationId,
   userRootDir: string,
+  runtimeEnvironmentNames: string[],
 ): PageConfigBuildTime {
   const configValueSources: ConfigValueSources = {}
   objectEntries(configDefinitionsLocal)
@@ -530,6 +578,7 @@ function resolvePageConfigBuildTime(
         userRootDir,
         false,
         plusFilesByLocationId,
+        runtimeEnvironmentNames,
       )
       if (sources.length === 0) return
       configValueSources[configName] = sources
@@ -562,6 +611,7 @@ function getProgrammaticPageConfigs(
   configDefinitionsResolved: ConfigDefinitionsResolved,
   plusFilesByLocationId: PlusFilesByLocationId,
   userRootDir: string,
+  runtimeEnvironmentNames: string[],
 ): PageConfigBuildTime[] {
   const pageConfigs: PageConfigBuildTime[] = []
   const entryIndexByLocationId: Record<string, number> = {}
@@ -654,6 +704,7 @@ function getProgrammaticPageConfigs(
           local.configDefinitions,
           plusFilesByLocationId,
           userRootDir,
+          runtimeEnvironmentNames,
         ),
       )
     })
@@ -1040,13 +1091,14 @@ function resolveConfigValueSources(
   userRootDir: string,
   isGlobal: boolean,
   plusFilesByLocationId: PlusFilesByLocationId,
+  runtimeEnvironmentNames: string[] = [],
 ): ConfigValueSource[] {
   let plusFilesConfig = plusFilesRelevant.filter((plusFile) => isDefiningConfig(plusFile, configName))
   // Make Vike extension installation idempotent. (Don't cumulate configs twice of an extension installed twice.) Since `plusFilesRelevant` is ordered by inheritance the occurrence closest to the page's locationId is the one kept.
   plusFilesConfig = dedupeExtensions(plusFilesConfig)
 
   let sources: ConfigValueSource[] = plusFilesConfig.flatMap((plusFile) =>
-    getConfigValueSources(configName, plusFile, configDef, userRootDir),
+    getConfigValueSources(configName, plusFile, configDef, userRootDir, runtimeEnvironmentNames),
   )
 
   // Filter hydrid global-local configs
@@ -1086,6 +1138,7 @@ function getConfigValueSources(
   plusFile: PlusFile,
   configDef: ConfigDefinitionInternal,
   userRootDir: string,
+  runtimeEnvironmentNames: string[],
 ): ConfigValueSource[] {
   const confVal = getConfVal(plusFile, configName)
   assert(confVal)
@@ -1153,7 +1206,7 @@ function getConfigValueSources(
         const configValueSource: ConfigValueSource = {
           ...configValueSourceCommon,
           ...value,
-          configEnv: resolveConfigEnv(configDef.env, pointerImport.fileExportPath),
+          configEnv: resolveConfigEnv(configDef.env, pointerImport.fileExportPath, runtimeEnvironmentNames),
           valueLoadedViaImport: true,
           valueIsDefinedByPlusValueFile: false,
           definedAt: pointerImport.fileExportPath,
@@ -1177,7 +1230,7 @@ function getConfigValueSources(
 
   // Defined by value file, i.e. +{configName}.js
   if (!plusFile.isConfigFile) {
-    const configEnvResolved = resolveConfigEnv(configDef.env, plusFile.filePath)
+    const configEnvResolved = resolveConfigEnv(configDef.env, plusFile.filePath, runtimeEnvironmentNames)
     assert(confVal.valueIsLoaded === !!configEnvResolved.config)
     const configValueSource: ConfigValueSource = {
       ...configValueSourceCommon,
@@ -1696,10 +1749,14 @@ function getConfigEnvValue(
 
   assertUsage(isObject(val), `${errMsgIntro} an invalid type ${pc.cyan(typeof val)}`)
 
-  assertKeys(val, ['config', 'server', 'client'] as const, `${errInvalidValue}:`)
-  assertUsage(hasProp(val, 'config', 'undefined') || hasProp(val, 'config', 'boolean'), errInvalidValue)
-  assertUsage(hasProp(val, 'server', 'undefined') || hasProp(val, 'server', 'boolean'), errInvalidValue)
-  assertUsage(hasProp(val, 'client', 'undefined') || hasProp(val, 'client', 'boolean'), errInvalidValue)
+  const reservedEnvironmentNames = ['ssr', 'shared', 'clear', 'default', 'eager', 'runtimes']
+  Object.entries(val).forEach(([name, value]) => {
+    assertUsage(name.length > 0 && !name.includes(':'), `${errInvalidValue}: ${pc.cyan(name)} isn't a valid name`)
+    assertUsage(!reservedEnvironmentNames.includes(name), `${errInvalidValue}: ${pc.cyan(name)} is reserved by Vike`)
+    const valid =
+      name === 'client' ? typeof value === 'boolean' || value === 'if-client-routing' : typeof value === 'boolean'
+    assertUsage(valid, errInvalidValue)
+  })
   /* To allow users to set an eager config:
    * - Uncomment line below.
    * - Add 'eager' to assertKeys() call above.
@@ -1707,7 +1764,7 @@ function getConfigEnvValue(
   assertUsage(hasProp(val, 'eager', 'undefined') || hasProp(val, 'eager', 'boolean'), errInvalidValue)
   */
 
-  return val
+  return val as ConfigEnv
 }
 
 function getConfigDefinitionOptional(configDefinitions: ConfigDefinitionsInternal, configName: string) {
@@ -1725,24 +1782,38 @@ function getConfVal(
   return confVal
 }
 
-function resolveConfigEnv(configEnv: ConfigEnv, filePath: FilePath) {
+function resolveConfigEnv(configEnv: ConfigEnv, filePath: FilePath, runtimeEnvironmentNames: string[]) {
   const configEnvResolved = { ...configEnv }
+  if (!filePath.filePathAbsoluteFilesystem) return configEnvResolved
 
-  if (filePath.filePathAbsoluteFilesystem) {
-    const suffixes = getFileSuffixes(filePath.fileName)
-    if (suffixes.includes('ssr') || suffixes.includes('server')) {
-      configEnvResolved.server = true
-      configEnvResolved.client = false
-    } else if (suffixes.includes('client')) {
-      configEnvResolved.client = true
-      configEnvResolved.server = false
-    } else if (suffixes.includes('shared')) {
-      configEnvResolved.server = true
-      configEnvResolved.client = true
-    }
+  const suffixes = getFileSuffixes(filePath.fileName)
+  const runtimeSuffix = resolveRuntimeEnvironmentSuffix(filePath, runtimeEnvironmentNames)
+  if (runtimeSuffix) {
+    setRuntimeEnvironments(configEnvResolved, runtimeEnvironmentNames, [runtimeSuffix])
+  } else if (suffixes.includes('ssr') || suffixes.includes('server')) {
+    setRuntimeEnvironments(configEnvResolved, runtimeEnvironmentNames, ['server'])
+  } else if (suffixes.includes('client')) {
+    setRuntimeEnvironments(configEnvResolved, runtimeEnvironmentNames, ['client'])
+  } else if (suffixes.includes('shared')) {
+    setRuntimeEnvironments(configEnvResolved, runtimeEnvironmentNames, ['server', 'client'])
   }
 
   return configEnvResolved
+}
+
+function setRuntimeEnvironments(configEnv: ConfigEnv, runtimeEnvironmentNames: string[], enabled: string[]) {
+  runtimeEnvironmentNames.forEach((name) => {
+    configEnv[name] = enabled.includes(name)
+  })
+}
+
+function resolveRuntimeEnvironmentSuffix(filePath: FilePathResolved, runtimeEnvironmentNames: string[]) {
+  const runtimeSuffixes = runtimeEnvironmentNames.filter((name) => filePath.fileName.includes(`.${name}.`))
+  assertUsage(
+    runtimeSuffixes.length <= 1,
+    `${filePath.filePathToShowToUser} has more than one named runtime suffix: ${runtimeSuffixes.join(', ')}`,
+  )
+  return runtimeSuffixes[0]
 }
 
 /** Whether configs defined in `locationId` apply to every page */
@@ -1813,6 +1884,7 @@ async function getVikeConfigDummy(esbuildCache: EsbuildCache): Promise<VikeConfi
     prerenderContext: prerenderContextDummy,
     _vikeConfigDependencies: esbuildCache.vikeConfigDependencies,
     _extensions: [],
+    _runtimeEnvironmentNames: [],
   }
   globalObject.vikeConfigSync = vikeConfigDummy
   globalObject.isV1Design_ = true

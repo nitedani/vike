@@ -13,45 +13,32 @@ import {
 import { handleAssetsManifest_isFixEnabled } from '../build/handleAssetsManifest.js'
 import { getConfigValueBuildTime } from '../../../../shared-server-client/page-configs/getConfigValueBuildTime.js'
 import { resolveIncludeAssetsImportedByServer } from '../../../../server/runtime/renderPageServer/getPageAssets/retrievePageAssetsProd.js'
+import type { RuntimeEnv } from './getConfigValueSourcesRelevant.js'
 import '../../assertEnvVite.js'
 
 async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise<string> {
   const result = parseVirtualFileId(id)
   assert(result && result.type === 'page-entry')
-  /* This assertion fails when using includeAssetsImportedByServer
-  {
-    const isForClientSide = !config.build.ssr
-    assert(result.isForClientSide === isForClientSide)
-  }
-  */
-  const { pageId, isForClientSide } = result
+  const { pageId, environmentName } = result
+  const runtimeEnv = resolveRuntimeEnv(environmentName, isDev)
   const vikeConfig = await getVikeConfigInternal(true)
   const { _pageConfigs: pageConfigs } = vikeConfig
   const pageConfig = pageConfigs.find((pageConfig) => pageConfig.pageId === pageId)
 
-  if (!isDev) {
-    assert(pageConfig)
-  } else {
-    if (!pageConfig) {
-      // Happens very seldom and can't reproduce reliably. Some kind of HMR race condition? It still happens as of June 2026 with Cloudflare Workers in development — but it isn't blocking, reloading the page fixes the issue.
-      throw getProjectError(`Outdated request. Try again. ${getDebugInfoStr({ id, pageId })}`)
-    }
+  if (!isDev) assert(pageConfig)
+  if (!pageConfig) {
+    // Happens very seldom and can't reproduce reliably. Some kind of HMR race condition? It still happens as of June 2026 with Cloudflare Workers in development — but it isn't blocking, reloading the page fixes the issue.
+    throw getProjectError(`Outdated request. Try again. ${getDebugInfoStr({ id, pageId })}`)
   }
 
-  const code = getCode(
-    pageConfig,
-    isForClientSide,
-    pageId,
-    resolveIncludeAssetsImportedByServer(vikeConfig.config),
-    isDev,
-  )
-  debug(id, isForClientSide ? 'CLIENT-SIDE' : 'SERVER-SIDE', code)
+  const code = getCode(pageConfig, runtimeEnv, pageId, resolveIncludeAssetsImportedByServer(vikeConfig.config), isDev)
+  debug(id, environmentName.toUpperCase(), code)
   return code
 }
 
 function getCode(
   pageConfig: PageConfigBuildTime,
-  isForClientSide: boolean,
+  runtimeEnv: RuntimeEnv,
   pageId: string,
   includeAssetsImportedByServer: boolean,
   isDev: boolean,
@@ -60,26 +47,34 @@ function getCode(
   const importStatements: string[] = []
   const filesEnv: FilesEnv = new Map()
   const isClientRouting = getConfigValueBuildTime(pageConfig, 'clientRouting', 'boolean')?.value ?? false
+  if ('environmentName' in runtimeEnv) runtimeEnv.isClientRouting = isClientRouting
 
   lines.push('export const configValuesSerialized = {')
-  lines.push(
-    ...serializeConfigValues(
-      pageConfig,
-      importStatements,
-      filesEnv,
-      { isForClientSide, isClientRouting, isDev },
-      '',
-      false,
-    ),
-  )
+  lines.push(...serializeConfigValues(pageConfig, importStatements, filesEnv, runtimeEnv, '', false))
   lines.push('};')
 
-  if (!handleAssetsManifest_isFixEnabled() && includeAssetsImportedByServer && isForClientSide && !isDev) {
+  if (shouldImportAssetsFromServer(runtimeEnv, includeAssetsImportedByServer, isDev)) {
     importStatements.push(
-      `import '${extractAssetsAddQuery(generateVirtualFileId({ type: 'page-entry', pageId, isForClientSide: false }))}'`,
+      `import '${extractAssetsAddQuery(
+        generateVirtualFileId({ type: 'page-entry', pageId, environmentName: 'server' }),
+      )}'`,
     )
   }
 
   const code = [...importStatements, ...lines].join('\n')
   return code
+}
+
+function resolveRuntimeEnv(environmentName: string, isDev: boolean): RuntimeEnv {
+  return { environmentName, isClientRouting: false, isDev }
+}
+
+function shouldImportAssetsFromServer(runtimeEnv: RuntimeEnv, includeAssetsImportedByServer: boolean, isDev: boolean) {
+  return (
+    handleAssetsManifest_isFixEnabled() === false &&
+    includeAssetsImportedByServer &&
+    'environmentName' in runtimeEnv &&
+    runtimeEnv.environmentName === 'client' &&
+    isDev === false
+  )
 }
