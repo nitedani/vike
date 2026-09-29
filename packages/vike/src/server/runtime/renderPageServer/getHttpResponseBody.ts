@@ -25,6 +25,7 @@ import {
 } from './html/stream.js'
 import { assert, assertUsage, assertWarning } from '../../../utils/assert.js'
 import { getHtmlString, type HtmlRender } from './html/renderHtml.js'
+import type { RenderHook } from './execHookOnRenderHtml.js'
 import pc from '@brillout/picocolors'
 import '../../assertEnvServer.js'
 
@@ -46,9 +47,7 @@ type HttpResponseBody = {
   pipeToWebWritable: StreamPipeWeb
 }
 
-type BodyHook = { hookFilePath: string; hookName: string }
-
-function getHttpResponseBody(responseBody: HtmlRender, renderHook: null | BodyHook) {
+function getHttpResponseBody(responseBody: HtmlRender, renderHook: null | RenderHook) {
   if (typeof responseBody !== 'string') {
     assertUsage(
       false,
@@ -58,7 +57,7 @@ function getHttpResponseBody(responseBody: HtmlRender, renderHook: null | BodyHo
   return responseBody
 }
 
-function getHttpResponseBodyStreamHandlers(responseBody: HtmlRender, renderHook: null | BodyHook) {
+function getHttpResponseBodyStreamHandlers(responseBody: HtmlRender, renderHook: null | RenderHook) {
   return {
     pipe(writable: StreamWritableNode | StreamWritableWeb) {
       const getErrMsgMixingStreamTypes = (writableType: 'Web Writable' | 'Node.js Writable') =>
@@ -175,14 +174,14 @@ function getHttpResponseBodyStreamHandlers(responseBody: HtmlRender, renderHook:
   }
 }
 
-function getErrMsg(responseBody: HtmlRender, renderHook: null | BodyHook, method: string, msgAddendum?: string) {
+function getErrMsg(responseBody: HtmlRender, renderHook: null | RenderHook, method: string, msgAddendum?: string) {
   assert(!msgAddendum || !msgAddendum.endsWith('.'))
   const errMsgBody = getErrMsgBody(responseBody, renderHook)
   return [`pageContext.httpResponse.${method} can't be used because the ${errMsgBody}`, msgAddendum, streamDocs]
     .filter(Boolean)
     .join('. ')
 }
-function getErrMsgBody(responseBody: HtmlRender, renderHook: null | BodyHook) {
+function getErrMsgBody(responseBody: HtmlRender, renderHook: null | RenderHook) {
   if (!renderHook) return `response body is ${getHookReturnType(responseBody)}`
   const { hookFilePath, hookName } = renderHook
   const hookReturnType = getHookReturnType(responseBody)
