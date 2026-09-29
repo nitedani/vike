@@ -1,12 +1,14 @@
 import { UiFrameworkExtension, ConfigSpec } from '../../components'
-import { Link } from '@brillout/docpress'
+import { Link, RepoLink } from '@brillout/docpress'
 
 <ConfigSpec
   env="server"
   global={null}
 />
 
-The `onRenderHtml()` hook defines how pages are rendered to HTML.
+The `onRenderHtml()` hook defines the server-rendered output of a page.
+
+> It isn't called if an earlier server hook sets <Link href="/pageContext#response">`pageContext.response`</Link>.
 
 The hooks `onRenderHtml()` and <Link href="/onRenderClient">`onRenderClient()`</Link> are essentially the glue code between Vike and your UI framework (React/Vue/Solid/...).
 
@@ -46,6 +48,30 @@ async function onRenderHtml(pageContext: PageContextServer){
 ```
 
 Where `pageContext.Page` is the <Link href="/Page">`+Page` value</Link> of the page that is being rendered.
+
+
+## Custom response
+
+Set <Link href="/pageContext#response">`pageContext.response`</Link> to serve content other than HTML from a page-scoped `+onRenderHtml` hook:
+
+```ts
+// pages/feed/+onRenderHtml.ts
+
+export default onRenderHtml
+
+import type { PageContextServer } from 'vike/types'
+
+function onRenderHtml(pageContext: PageContextServer) {
+  pageContext.response = new Response(
+    '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Vike Feed</title><id>https://example.org/feed.atom</id><category term="server-rendered"/></feed>',
+    { headers: { 'Content-Type': 'application/atom+xml;charset=utf-8' } },
+  )
+}
+```
+
+The example above is covered by <RepoLink path="/test/pageContextResponse/atom/+onRenderHtml.ts" />.
+
+A native `Response` defines the entire HTTP response, including its status, headers, and body. Don't return a value when setting `pageContext.response`.
 
 
 ## See also

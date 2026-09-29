@@ -48,15 +48,25 @@ async function execHookOnRenderHtml(
       _isHtmlOnly: boolean
       _baseServer: string
       _requestId: number
+      response?: Response
     },
 ): Promise<{
   renderHook: RenderHook
-  htmlRender: HtmlRender
+  htmlRender: HtmlRender | null
 }> {
   const hook = getRenderHook(pageContext)
   objectAssign(pageContext, { _renderHook: hook })
 
   const { hookReturn } = await execHookSingleWithReturn(hook, pageContext, getPageContextPublicServer)
+
+  const responseSet = pageContext.response !== undefined
+  if (responseSet) {
+    assertUsage(
+      hookReturn === undefined,
+      `The ${hook.hookName as string}() hook defined at ${hook.hookFilePath} shouldn't return a value when setting pageContext.response`,
+    )
+    return { htmlRender: null, renderHook: hook }
+  }
 
   const { documentHtml, pageContextProvidedByRenderHook, pageContextPromise, injectFilter } = processHookReturnValue(
     hookReturn,

@@ -18,40 +18,31 @@ import '../../assertEnvVite.js'
 async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise<string> {
   const result = parseVirtualFileId(id)
   assert(result && result.type === 'page-entry')
-  /* This assertion fails when using includeAssetsImportedByServer
-  {
-    const isForClientSide = !config.build.ssr
-    assert(result.isForClientSide === isForClientSide)
-  }
-  */
-  const { pageId, isForClientSide } = result
+  const { pageId, environmentName } = result
   const vikeConfig = await getVikeConfigInternal(true)
   const { _pageConfigs: pageConfigs } = vikeConfig
   const pageConfig = pageConfigs.find((pageConfig) => pageConfig.pageId === pageId)
 
-  if (!isDev) {
-    assert(pageConfig)
-  } else {
-    if (!pageConfig) {
-      // Happens very seldom and can't reproduce reliably. Some kind of HMR race condition? It still happens as of June 2026 with Cloudflare Workers in development — but it isn't blocking, reloading the page fixes the issue.
-      throw getProjectError(`Outdated request. Try again. ${getDebugInfoStr({ id, pageId })}`)
-    }
+  if (!isDev) assert(pageConfig)
+  if (!pageConfig) {
+    // Happens very seldom and can't reproduce reliably. Some kind of HMR race condition? It still happens as of June 2026 with Cloudflare Workers in development — but it isn't blocking, reloading the page fixes the issue.
+    throw getProjectError(`Outdated request. Try again. ${getDebugInfoStr({ id, pageId })}`)
   }
 
   const code = getCode(
     pageConfig,
-    isForClientSide,
+    environmentName,
     pageId,
     resolveIncludeAssetsImportedByServer(vikeConfig.config),
     isDev,
   )
-  debug(id, isForClientSide ? 'CLIENT-SIDE' : 'SERVER-SIDE', code)
+  debug(id, environmentName.toUpperCase(), code)
   return code
 }
 
 function getCode(
   pageConfig: PageConfigBuildTime,
-  isForClientSide: boolean,
+  environmentName: string,
   pageId: string,
   includeAssetsImportedByServer: boolean,
   isDev: boolean,
@@ -67,16 +58,18 @@ function getCode(
       pageConfig,
       importStatements,
       filesEnv,
-      { isForClientSide, isClientRouting, isDev },
+      { environmentName, isClientRouting, isDev },
       '',
       false,
     ),
   )
   lines.push('};')
 
-  if (!handleAssetsManifest_isFixEnabled() && includeAssetsImportedByServer && isForClientSide && !isDev) {
+  if (!handleAssetsManifest_isFixEnabled() && includeAssetsImportedByServer && environmentName === 'client' && !isDev) {
     importStatements.push(
-      `import '${extractAssetsAddQuery(generateVirtualFileId({ type: 'page-entry', pageId, isForClientSide: false }))}'`,
+      `import '${extractAssetsAddQuery(
+        generateVirtualFileId({ type: 'page-entry', pageId, environmentName: 'server' }),
+      )}'`,
     )
   }
 

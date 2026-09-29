@@ -9,6 +9,7 @@ import { ConfigSpec } from '../../components'
 ```ts ts-only hide-menu
 type Meta = {
   env: {
+    [environmentName: string]: boolean | undefined
     client?: boolean
     server?: boolean
     config?: boolean
@@ -39,6 +40,31 @@ The `meta` setting enables you to create:
    - Example: `+onInit` or `+onBeforeFetchingData`
  - **Modifying the environment of existing hooks**.
    - <Link href="#example-modify-data-env" doNotInferSectionTitle />
+
+
+## Named runtime environments
+
+The keys of `env` can be the name of any [Vite environment](https://vite.dev/guide/api-environment). For example, an integration that creates an `rsc` environment can make a config value available only in that environment:
+
+```ts
+// /pages/+config.ts
+
+import type { Config } from 'vike/types'
+
+export default {
+  meta: {
+    rscOnlyValue: {
+      env: { server: false, client: false, rsc: true }
+    }
+  }
+} satisfies Config
+```
+
+Vike infers custom environment names from these keys and validates that each one exists in Vite's resolved `config.environments`.
+
+The names `ssr`, `shared`, `clear`, `default`, `runtimes`, and `eager` are reserved and rejected. The `server` and `client` keys are the built-in runtime environment names. The `config` and `production` keys keep their existing meanings and aren't runtime environment names.
+
+Code running in the named environment can use <Link href="/vike-runtime">`vike/runtime`</Link> to read its name and load its page config.
 
 
 ## Example: `+dataEndpointUrl`

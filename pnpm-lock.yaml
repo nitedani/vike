@@ -1628,6 +1628,10 @@ importers:
       vite:
         specifier: ^6.3.2
         version: 6.3.5(@types/node@24.10.2)(jiti@2.6.1)(lightningcss@1.32.0)(terser@5.38.1)(tsx@4.20.6)
+    devDependencies:
+      cross-env:
+        specifier: ^7.0.3
+        version: 7.0.3
 
   test/includeAssetsImportedByServer:
     dependencies:
