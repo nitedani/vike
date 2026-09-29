@@ -1,4 +1,5 @@
 export { pluginCommon }
+export { assertRuntimeEnvironmentsExist }
 
 import { type InlineConfig, type Plugin, type ResolvedConfig, type UserConfig } from 'vite'
 import { isDevCheck } from '../../../utils/isDev.js'
@@ -76,16 +77,7 @@ function pluginCommon(vikeVitePluginOptions: unknown): Plugin[] {
           assertViteRoot(config._rootResolvedEarly!, config)
           assertSingleInstance(config)
           const vikeConfig = await getVikeConfigInternal()
-          vikeConfig._runtimeEnvironmentNames
-            .filter((name) => name !== 'client' && name !== 'server')
-            .forEach((name) => {
-              assertUsage(
-                !!config.environments[name],
-                `The runtime environment ${pc.cyan(JSON.stringify(name))} is used by ${pc.cyan(
-                  'meta.env',
-                )} but it doesn't exist in ${pc.cyan('config.environments')}`,
-              )
-            })
+          assertRuntimeEnvironmentsExist(vikeConfig._runtimeEnvironmentNames, config.environments)
         },
       },
     },
@@ -184,6 +176,22 @@ function workaroundCI(config: ResolvedConfig) {
     config.server.host ??= true
     config.preview.host ??= true
   }
+}
+
+function assertRuntimeEnvironmentsExist(
+  runtimeEnvironmentNames: string[],
+  environments: ResolvedConfig['environments'],
+) {
+  runtimeEnvironmentNames
+    .filter((name) => name !== 'client' && name !== 'server')
+    .forEach((name) => {
+      assertUsage(
+        !!environments[name],
+        `The runtime environment ${pc.cyan(JSON.stringify(name))} is used by ${pc.cyan(
+          'meta.env',
+        )} but it doesn't exist in ${pc.cyan('config.environments')}`,
+      )
+    })
 }
 
 function assertSingleInstance(config: ResolvedConfig) {
