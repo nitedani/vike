@@ -1763,7 +1763,7 @@ function getConfigEnvValue(
   })
   /* To allow users to set an eager config:
    * - Uncomment line below.
-   * - Add 'eager' to assertKeys() call above.
+   * - Remove 'eager' from reservedEnvironmentNames above.
    * - Add `eager: boolean` to ConfigEnv type.
   assertUsage(hasProp(val, 'eager', 'undefined') || hasProp(val, 'eager', 'boolean'), errInvalidValue)
   */
