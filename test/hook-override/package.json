@@ -1,6 +1,7 @@
 {
   "scripts": {
     "dev": "vike dev",
+    "dev:alwaysFetchPageContextFromServer": "cross-env ALWAYS_FETCH_PAGE_CONTEXT_FROM_SERVER=true vike dev",
     "build": "vike build",
     "preview": "vike build && vike preview"
   },
@@ -14,5 +15,8 @@
     "vike": "0.4.267",
     "vite": "^6.3.2"
   },
-  "type": "module"
+  "type": "module",
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  }
 }

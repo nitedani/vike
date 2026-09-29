@@ -3,10 +3,11 @@ export { testRun as test }
 import { run, page, test, expect, getServerUrl, fetchHtml, expectLog, autoRetry } from '@brillout/test-e2e'
 import { ensureWasClientSideRouted, expectPageContextJsonRequest, expectUrl, testCounter } from '../utils'
 
-function testRun(cmd: 'pnpm run dev' | 'pnpm run preview', alwaysFetchPageContextFromServer = false) {
+function testRun(cmd: 'pnpm run dev' | 'pnpm run dev:alwaysFetchPageContextFromServer' | 'pnpm run preview') {
   run(cmd)
 
-  const isDev = cmd === 'pnpm run dev'
+  const isDev = cmd !== 'pnpm run preview'
+  const alwaysFetchPageContextFromServer = cmd === 'pnpm run dev:alwaysFetchPageContextFromServer'
 
   test('HTML', async () => {
     const t = async (
