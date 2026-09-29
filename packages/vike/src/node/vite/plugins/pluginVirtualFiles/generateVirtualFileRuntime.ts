@@ -3,6 +3,7 @@ export { generateVirtualFileRuntimeCode }
 
 import { generateVirtualFileId } from '../../../../shared-server-node/virtualFileId.js'
 import { requireResolveDistFile } from '../../../../utils/requireResolve.js'
+import { getVikeEnvironmentName } from '../../shared/environmentName.js'
 import '../../assertEnvVite.js'
 
 function generateVirtualFileRuntime(environmentName: string, isDev: boolean): string {
@@ -27,12 +28,10 @@ function generateVirtualFileRuntimeCode(environmentName: string, isDev: boolean,
   ].join('\n')
 }
 
-function resolveGlobalEntryId(environmentName: string) {
+function resolveGlobalEntryId(viteEnvironmentName: string) {
+  const environmentName = getVikeEnvironmentName(viteEnvironmentName)
   if (environmentName === 'client') {
     return generateVirtualFileId({ type: 'global-entry', environmentName: 'client', isClientRouting: true })
-  }
-  if (environmentName === 'ssr' || environmentName === 'server') {
-    return generateVirtualFileId({ type: 'global-entry', environmentName: 'server' })
   }
   return generateVirtualFileId({ type: 'global-entry', environmentName })
 }

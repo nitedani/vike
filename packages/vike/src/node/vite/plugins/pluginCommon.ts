@@ -12,6 +12,7 @@ import { assertRollupInput } from './build/pluginBuildConfig.js'
 import pc from '@brillout/picocolors'
 import { assertResolveAlias } from './pluginCommon/assertResolveAlias.js'
 import { getVikeConfigInternal, setVikeConfigContext } from '../shared/resolveVikeConfigInternal.js'
+import { isVikeEnvironmentBuiltIn } from '../shared/environmentName.js'
 import { assertViteRoot, getViteRoot, normalizeViteRoot } from '../../api/resolveViteConfigUser.js'
 import { temp_disablePrerenderAutoRun } from '../../prerender/context.js'
 import { resolvePrerenderConfigGlobal, isDistServerRemoved } from '../../prerender/resolvePrerenderConfig.js'
@@ -183,7 +184,7 @@ function assertRuntimeEnvironmentsExist(
   environments: ResolvedConfig['environments'],
 ) {
   runtimeEnvironmentNames
-    .filter((name) => name !== 'client' && name !== 'server')
+    .filter((name) => !isVikeEnvironmentBuiltIn(name))
     .forEach((name) => {
       assertUsage(
         !!environments[name],

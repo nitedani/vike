@@ -12,6 +12,7 @@ import { requireResolveDistFile } from '../../../../utils/requireResolve.js'
 import { unique } from '../../../../utils/unique.js'
 import { objectMap } from '../../../../utils/objectMap.js'
 import { getVikeConfigInternal } from '../../shared/resolveVikeConfigInternal.js'
+import { getVikeEnvironmentName, isVikeEnvironmentBuiltIn } from '../../shared/environmentName.js'
 import { findPageFiles } from '../../shared/findPageFiles.js'
 import type { ResolvedConfig, Plugin } from 'vite'
 import { generateVirtualFileId } from '../../../../shared-server-node/virtualFileId.js'
@@ -84,10 +85,9 @@ async function injectEnvironmentEntries(config: ResolvedConfig) {
   }
 }
 
-function shouldInjectVikeBuildInputs(environmentName: string, runtimeEnvironmentNames: string[]) {
-  return (
-    environmentName === 'client' || environmentName === 'server' || !runtimeEnvironmentNames.includes(environmentName)
-  )
+function shouldInjectVikeBuildInputs(viteEnvironmentName: string, runtimeEnvironmentNames: string[]) {
+  const environmentName = getVikeEnvironmentName(viteEnvironmentName)
+  return isVikeEnvironmentBuiltIn(environmentName) || !runtimeEnvironmentNames.includes(environmentName)
 }
 
 async function getEntriesForSide(
