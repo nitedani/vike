@@ -109,11 +109,6 @@ async function renderPageServerResponse<PageContext extends PageContextRender & 
   pageContext: PageContext,
   allowHtmlResponse = true,
 ): Promise<(PageContext & PageContextAfterRender) | null> {
-  {
-    const pageContextWithResponse = resolvePageContextResponse(pageContext)
-    if (pageContextWithResponse) return pageContextWithResponse
-  }
-
   const { htmlRender, renderHook } = await execHookOnRenderHtml(pageContext)
   {
     const pageContextWithResponse = resolvePageContextResponse(pageContext)
