@@ -3,7 +3,7 @@ export { createRuntime }
 import { assertUsage } from '../utils/assert.js'
 import { findPageConfig } from '../shared-server-client/page-configs/findPageConfig.js'
 import { loadAndParseVirtualFilePageEntry } from '../shared-server-client/page-configs/loadAndParseVirtualFilePageEntry.js'
-import { resolvePageConfigPublic } from '../shared-server-client/page-configs/resolveVikeConfigPublic.js'
+import { getPublicCopy, resolvePageConfigPublic } from '../shared-server-client/page-configs/resolveVikeConfigPublic.js'
 import { parsePageConfigsSerialized } from '../shared-server-client/page-configs/serialize/parsePageConfigsSerialized.js'
 import type {
   PageConfigGlobalRuntimeSerialized,
@@ -28,11 +28,6 @@ function createRuntime(
       pageConfigGlobalValues: pageConfigGlobal.configValues,
       pageConfigValues: pageConfigLoaded.configValues,
     })
-    return {
-      config: configInternal.config,
-      _source: configInternal.source,
-      _sources: configInternal.sources,
-      _from: configInternal.from,
-    }
+    return getPublicCopy(configInternal)
   }
 }

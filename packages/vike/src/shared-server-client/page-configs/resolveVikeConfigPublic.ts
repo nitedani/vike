@@ -2,6 +2,7 @@
 // TO-DO/soon/flat-pageContext: rename definedAt => definedBy
 export { resolveGlobalConfigPublic }
 export { resolvePageConfigPublic }
+export { getPublicCopy }
 export { resolvePageContextConfig }
 export { resolveGlobalContextConfig }
 export type { PageContextConfig }
