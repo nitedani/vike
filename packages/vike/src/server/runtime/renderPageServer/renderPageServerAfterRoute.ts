@@ -24,7 +24,6 @@ import { execHookDataAndOnBeforeRender } from './execHookDataAndOnBeforeRender.j
 import { logRuntimeError } from '../loggerRuntime.js'
 import { getPageContextPublicServer } from './getPageContextPublicServer.js'
 import { execHookGuard } from '../../../shared-server-client/route/execHookGuard.js'
-import pc from '@brillout/picocolors'
 import { isServerSideError } from '../../../shared-server-client/misc/isServerSideError.js'
 import type { PageContextCreatedServer } from './createPageContextServer.js'
 import type { PageContextBegin } from '../renderPageServer.js'
@@ -160,17 +159,12 @@ async function prerenderPageEntry(
   await execHookDataAndOnBeforeRender(pageContext)
   assertUsage(pageContext.response === undefined, 'Cannot pre-render a page whose hook sets pageContext.response')
 
-  const { htmlRender, renderHook } = await execHookOnRenderHtml(pageContext)
+  const { htmlRender } = await execHookOnRenderHtml(pageContext)
   assertUsage(
     pageContext.response === undefined,
     'Cannot pre-render a page whose onRenderHtml() hook sets pageContext.response',
   )
-  assertUsage(
-    htmlRender !== null,
-    `Cannot pre-render ${pc.cyan(pageContext.urlOriginal)} because the ${renderHook.hookName}() hook defined by ${
-      renderHook.hookFilePath
-    } didn't return content.`,
-  )
+  assert(htmlRender !== null)
   const documentHtml = await getHtmlString(htmlRender)
   assert(typeof documentHtml === 'string')
   if (!pageContext._usesClientRouter) {
