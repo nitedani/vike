@@ -13,5 +13,10 @@ function fixtureRunOptions(port: number) {
 }
 
 function tolerateFixtureWarning(logText: string): boolean {
-  return logText.includes('Failed to resolve dependency: vike >') || logText.includes('[COMMONJS_VARIABLE_IN_ESM]')
+  return (
+    logText.includes('Failed to resolve dependency: vike >') ||
+    // Rolldown / esbuild
+    logText.includes('[COMMONJS_VARIABLE_IN_ESM]') ||
+    logText.includes('[commonjs-variable-in-esm]')
+  )
 }
