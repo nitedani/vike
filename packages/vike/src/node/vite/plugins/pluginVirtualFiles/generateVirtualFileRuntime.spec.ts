@@ -19,4 +19,16 @@ describe('generateVirtualFileRuntimeCode()', () => {
       code.indexOf('import("virtual:vike:global-entry:worker")'),
     )
   })
+
+  it.each([
+    ['ssr', 'virtual:vike:global-entry:server'],
+    ['server', 'virtual:vike:global-entry:server'],
+    ['client', 'virtual:vike:global-entry:client:client-routing'],
+    ['rsc', 'virtual:vike:global-entry:rsc'],
+    ['worker', 'virtual:vike:global-entry:worker'],
+  ])('maps Vite environment %s to %s', (viteEnvironmentName, globalEntryId) => {
+    const code = generateVirtualFileRuntimeCode(viteEnvironmentName, false, '/vike/dist/runtime/createRuntime.js')
+    expect(code).toContain(`export const environmentName = ${JSON.stringify(viteEnvironmentName)};`)
+    expect(code).toContain(`import(${JSON.stringify(globalEntryId)})`)
+  })
 })

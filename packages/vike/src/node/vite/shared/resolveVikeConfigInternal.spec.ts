@@ -26,3 +26,16 @@ describe('config environment names', () => {
     expect(shouldInjectVikeBuildInputs('client', environmentNames)).toBe(true)
   })
 })
+
+describe('shouldInjectVikeBuildInputs()', () => {
+  const environmentNames = ['server', 'client', 'rsc']
+  it.each([
+    ['ssr', true],
+    ['server', true],
+    ['client', true],
+    ['rsc', false],
+    ['worker', true],
+  ])('Vite environment %s => %s', (viteEnvironmentName, expected) => {
+    expect(shouldInjectVikeBuildInputs(viteEnvironmentName, environmentNames)).toBe(expected)
+  })
+})
