@@ -3,6 +3,7 @@ export { getConfigValueSourceRelevantAnyEnv }
 export { isRuntimeEnvMatch }
 export { isConfigSourceValueNull }
 export type { RuntimeEnv }
+export type { RuntimeEnvRuntime }
 
 import type {
   ConfigEnv,
@@ -14,7 +15,8 @@ import { assert } from '../../../../utils/assert.js'
 import { getFileSuffixes } from '../../../../shared-server-node/getFileSuffixes.js'
 import '../../assertEnvVite.js'
 
-type RuntimeEnv = { environmentName: string; isClientRouting?: boolean; isDev?: boolean } | { isForConfig: true }
+type RuntimeEnv = RuntimeEnvRuntime | { isForConfig: true }
+type RuntimeEnvRuntime = { environmentName: string; isClientRouting?: boolean; isDev?: boolean }
 
 type PageConfigPartial = Pick<
   PageConfigBuildTime | PageConfigGlobalBuildTime,

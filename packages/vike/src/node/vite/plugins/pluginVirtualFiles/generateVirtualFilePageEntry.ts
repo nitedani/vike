@@ -13,14 +13,12 @@ import {
 import { handleAssetsManifest_isFixEnabled } from '../build/handleAssetsManifest.js'
 import { getConfigValueBuildTime } from '../../../../shared-server-client/page-configs/getConfigValueBuildTime.js'
 import { resolveIncludeAssetsImportedByServer } from '../../../../server/runtime/renderPageServer/getPageAssets/retrievePageAssetsProd.js'
-import type { RuntimeEnv } from './getConfigValueSourcesRelevant.js'
 import '../../assertEnvVite.js'
 
 async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise<string> {
   const result = parseVirtualFileId(id)
   assert(result && result.type === 'page-entry')
   const { pageId, environmentName } = result
-  const runtimeEnv = resolveRuntimeEnv(environmentName, isDev)
   const vikeConfig = await getVikeConfigInternal(true)
   const { _pageConfigs: pageConfigs } = vikeConfig
   const pageConfig = pageConfigs.find((pageConfig) => pageConfig.pageId === pageId)
@@ -31,14 +29,20 @@ async function generateVirtualFilePageEntry(id: string, isDev: boolean): Promise
     throw getProjectError(`Outdated request. Try again. ${getDebugInfoStr({ id, pageId })}`)
   }
 
-  const code = getCode(pageConfig, runtimeEnv, pageId, resolveIncludeAssetsImportedByServer(vikeConfig.config), isDev)
+  const code = getCode(
+    pageConfig,
+    environmentName,
+    pageId,
+    resolveIncludeAssetsImportedByServer(vikeConfig.config),
+    isDev,
+  )
   debug(id, environmentName.toUpperCase(), code)
   return code
 }
 
 function getCode(
   pageConfig: PageConfigBuildTime,
-  runtimeEnv: RuntimeEnv,
+  environmentName: string,
   pageId: string,
   includeAssetsImportedByServer: boolean,
   isDev: boolean,
@@ -47,13 +51,21 @@ function getCode(
   const importStatements: string[] = []
   const filesEnv: FilesEnv = new Map()
   const isClientRouting = getConfigValueBuildTime(pageConfig, 'clientRouting', 'boolean')?.value ?? false
-  if ('environmentName' in runtimeEnv) runtimeEnv.isClientRouting = isClientRouting
 
   lines.push('export const configValuesSerialized = {')
-  lines.push(...serializeConfigValues(pageConfig, importStatements, filesEnv, runtimeEnv, '', false))
+  lines.push(
+    ...serializeConfigValues(
+      pageConfig,
+      importStatements,
+      filesEnv,
+      { environmentName, isClientRouting, isDev },
+      '',
+      false,
+    ),
+  )
   lines.push('};')
 
-  if (shouldImportAssetsFromServer(runtimeEnv, includeAssetsImportedByServer, isDev)) {
+  if (!handleAssetsManifest_isFixEnabled() && includeAssetsImportedByServer && environmentName === 'client' && !isDev) {
     importStatements.push(
       `import '${extractAssetsAddQuery(
         generateVirtualFileId({ type: 'page-entry', pageId, environmentName: 'server' }),
@@ -63,18 +75,4 @@ function getCode(
 
   const code = [...importStatements, ...lines].join('\n')
   return code
-}
-
-function resolveRuntimeEnv(environmentName: string, isDev: boolean): RuntimeEnv {
-  return { environmentName, isClientRouting: false, isDev }
-}
-
-function shouldImportAssetsFromServer(runtimeEnv: RuntimeEnv, includeAssetsImportedByServer: boolean, isDev: boolean) {
-  return (
-    handleAssetsManifest_isFixEnabled() === false &&
-    includeAssetsImportedByServer &&
-    'environmentName' in runtimeEnv &&
-    runtimeEnv.environmentName === 'client' &&
-    isDev === false
-  )
 }

@@ -102,7 +102,7 @@ function pluginVirtualFiles(): Plugin[] {
             }
             if (idParsed.type === 'global-entry') {
               if (idParsed.environmentName !== 'client' && idParsed.environmentName !== 'server') {
-                return generateVirtualFileGlobalEntry({ environmentName: idParsed.environmentName, isDev }, isDev, id)
+                return generateVirtualFileGlobalEntry({ environmentName: idParsed.environmentName, isDev }, id)
               }
               const code = await generateVirtualFileGlobalEntryWithOldDesign(
                 id,

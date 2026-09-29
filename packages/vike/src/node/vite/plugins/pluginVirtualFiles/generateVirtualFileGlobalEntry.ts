@@ -9,33 +9,29 @@ import {
   serializeConfigValues,
 } from '../../../../shared-server-client/page-configs/serialize/serializeConfigValues.js'
 import { VIRTUAL_FILE_ID_constantsGlobalThis } from '../pluginReplaceConstantsGlobalThis.js'
-import type { RuntimeEnv } from './getConfigValueSourcesRelevant.js'
+import type { RuntimeEnvRuntime } from './getConfigValueSourcesRelevant.js'
 import '../../assertEnvVite.js'
 
-type RuntimeEnvRuntime = Exclude<RuntimeEnv, { isForConfig: true }>
-
 async function generateVirtualFileGlobalEntry(
-  runtimeEnv: RuntimeEnvRuntime,
-  isDev: boolean,
+  runtimeEnv: RuntimeEnvRuntime & { isDev: boolean },
   id: string,
 ): Promise<string> {
   const vikeConfig = await getVikeConfigInternal(true)
   const { _pageConfigs: pageConfigs, _pageConfigGlobal: pageConfigGlobal } = vikeConfig
-  return getCode(pageConfigs, pageConfigGlobal, runtimeEnv, isDev, id)
+  return getCode(pageConfigs, pageConfigGlobal, runtimeEnv, id)
 }
 
 function getCode(
   pageConfigs: PageConfigBuildTime[],
   pageConfigGlobal: PageConfigGlobalBuildTime,
-  runtimeEnv: RuntimeEnvRuntime,
-  isDev: boolean,
+  runtimeEnv: RuntimeEnvRuntime & { isDev: boolean },
   id: string,
 ): string {
   const lines: string[] = []
   const importStatements: string[] = []
   const filesEnv: FilesEnv = new Map()
 
-  const { environmentName } = runtimeEnv
+  const { environmentName, isDev } = runtimeEnv
   const isForClientSide = environmentName === 'client'
 
   if (!isForClientSide) importStatements.push(`import '${VIRTUAL_FILE_ID_constantsGlobalThis}';`)
