@@ -1,5 +1,4 @@
 export { createHttpResponsePage }
-export { getPageStatusCode }
 export { createHttpResponsePageJson }
 export { createHttpResponseErrorFallback }
 export { createHttpResponseErrorFallback_noGlobalContext }
