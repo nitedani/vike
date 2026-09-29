@@ -366,14 +366,14 @@ async function renderPageServerEntryRecursive_onError(
           )} doesn't occur while the error page is being rendered.`,
           { onlyOnce: false },
         )
-        const pageContextHttpErrorFallback = await getPageContextHttpErrorFallback(err, pageContextBegin)
+        const pageContextHttpErrorFallback = getPageContextHttpErrorFallback(err, pageContextBegin)
         return pageContextHttpErrorFallback
       }
     }
     if (!isSameErrorMessage(errErrorPage, err)) {
       logRuntimeError(errErrorPage, pageContextErrorPageInit)
     }
-    const pageContextHttpErrorFallback = await getPageContextHttpErrorFallback(err, pageContextBegin)
+    const pageContextHttpErrorFallback = getPageContextHttpErrorFallback(err, pageContextBegin)
     return pageContextHttpErrorFallback
   }
   return pageContextErrorPage
