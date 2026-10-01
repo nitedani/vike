@@ -12,7 +12,7 @@ import { unique } from '../../../../utils/unique.js'
 import { objectMap } from '../../../../utils/objectMap.js'
 import { getVikeConfigInternal } from '../../shared/resolveVikeConfigInternal.js'
 import { findPageFiles } from '../../shared/findPageFiles.js'
-import type { ResolvedConfig, Plugin } from 'vite'
+import type { InlineConfig, ResolvedConfig, Plugin } from 'vite'
 import { generateVirtualFileId } from '../../../../shared-server-node/virtualFileId.js'
 import type { PageConfigBuildTime } from '../../../../types/PageConfig.js'
 import type { FileType } from '../../../../shared-server-client/getPageFiles/fileTypes.js'
@@ -42,8 +42,7 @@ function pluginBuildConfig(): Plugin[] {
           handleAssetsManifest_alignCssTarget(config)
           onSetupBuild()
           assertRollupInput(config)
-          const entriesClient = await getEntries(config, false)
-          const entriesServer = await getEntries(config, true)
+          const { entriesClient, entriesServer } = await getEntriesOncePerBuild(config)
           for (const [envName, envConfig] of Object.entries(config.environments)) {
             const entries = isViteServerSide_configEnvironment(envName, envConfig) ? entriesServer : entriesClient
             assert(Object.keys(entries).length > 0)
@@ -68,6 +67,23 @@ function pluginBuildConfig(): Plugin[] {
       },
     },
   ]
+}
+
+// Vite resolves the config several times per build (e.g. once per environment), always with the same `inlineConfig` object
+const entriesPerBuild = new WeakMap<
+  InlineConfig,
+  Promise<{ entriesClient: Record<string, string>; entriesServer: Record<string, string> }>
+>()
+function getEntriesOncePerBuild(config: ResolvedConfig) {
+  let entries = entriesPerBuild.get(config.inlineConfig)
+  if (!entries) {
+    entries = (async () => ({
+      entriesClient: await getEntries(config, false),
+      entriesServer: await getEntries(config, true),
+    }))()
+    entriesPerBuild.set(config.inlineConfig, entries)
+  }
+  return entries
 }
 
 async function getEntries(config: ResolvedConfig, isServerSide: boolean): Promise<Record<string, string>> {
