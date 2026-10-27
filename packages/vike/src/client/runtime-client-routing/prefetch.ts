@@ -2,6 +2,7 @@ export { prefetch }
 export { getPageContextPrefetched }
 export { initLinkPrefetchHandlers }
 export { populatePageContextPrefetchCache }
+export { abortPrefetchesOfOtherPages }
 export { addLinkPrefetchHandlers }
 export { addLinkPrefetchHandlers_watch }
 export { addLinkPrefetchHandlers_unwatch }
@@ -42,6 +43,8 @@ const globalObject = getGlobalObject('prefetch.ts', {
     string, // URL
     PrefetchedPageContext
   >,
+  // The prefetched pageContexts that may still be downloading their streamed values (https://vike.dev/passToClient#streaming)
+  prefetchesStreaming: [] as { key: string; abortController: AbortController }[],
 })
 
 type ResultPageContextFromServer = Awaited<ReturnType<typeof getPageContextFromHooksServer>>
@@ -99,8 +102,22 @@ async function prefetchPageContextFromHooksServer(
   pageContextLink: PageContextForPrefetch,
   resultMaxAge: number | null,
 ): Promise<void> {
-  const result = await getPageContextFromHooksServer(pageContextLink, false)
-  setPageContextPrefetchCache(pageContextLink, result, resultMaxAge)
+  // pageContextLink.abortSignal never aborts: the prefetch gets its own, which abortPrefetchesOfOtherPages() aborts upon a navigation elsewhere, if its pageContext was already received
+  const abortController = new AbortController()
+  const pageContextPrefetch = { ...pageContextLink, abortSignal: abortController.signal }
+  const result = await getPageContextFromHooksServer(pageContextPrefetch, false)
+  globalObject.prefetchesStreaming.push({ key: getCacheKey(pageContextLink.urlPathname), abortController })
+  setPageContextPrefetchCache(pageContextPrefetch, result, resultMaxAge)
+}
+// Upon navigation: the pageContexts prefetched for other pages, once received, stop downloading their streamed values
+function abortPrefetchesOfOtherPages(urlPathname: string): void {
+  const key = getCacheKey(urlPathname)
+  globalObject.prefetchesStreaming = globalObject.prefetchesStreaming.filter((prefetch) => {
+    // The navigation may use the pageContext prefetched for its own page
+    if (prefetch.key === key) return true
+    prefetch.abortController.abort()
+    return false
+  })
 }
 function populatePageContextPrefetchCache(
   pageContext: PageContextForPrefetch /*& PageContextConfig*/,
@@ -118,11 +135,22 @@ function setPageContextPrefetchCache(
   if (resultMaxAge === null) resultMaxAge = getResultMaxAge()
   const key = getCacheKey(pageContext.urlPathname)
   assert(isBrilloutDocpress()) // Ensure this API isn't used by anyone else
-  globalObject.prefetchedPageContexts[key] = {
+  const found: PrefetchedPageContext = {
     resultFetchedAt: Date.now(),
     resultMaxAge,
     result,
   }
+  globalObject.prefetchedPageContexts[key] = found
+  // Once pageContext.abortSignal aborts, the streamed values still pending never settle => the next navigation to the page fetches its pageContext anew
+  // - An entry without pending values stays: @brillout/docpress caches pageContexts forever (`prefetch.pageContext: Infinity`)
+  if (result.is404ServerSideRouted) return
+  const { _hasPendingStreamedValues } = result.pageContextFromHooksServer
+  if (!_hasPendingStreamedValues) return
+  pageContext.abortSignal.addEventListener('abort', () => {
+    if (globalObject.prefetchedPageContexts[key] === found && _hasPendingStreamedValues()) {
+      delete globalObject.prefetchedPageContexts[key]
+    }
+  })
 }
 function getResultMaxAge(): number {
   const pageContextCurrent = getPageContextCurrent()

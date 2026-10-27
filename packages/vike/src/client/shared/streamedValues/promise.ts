@@ -13,10 +13,19 @@ const promise: StreamedValueType = {
     const { promise: value, resolve, reject } = genPromise<unknown>({ timeout: null })
     // Avoid an unhandled rejection if the user doesn't use the promise
     value.catch(() => {})
+    let isPending = true
     return {
       value,
-      push: (line) => ('v' in line ? resolve(parseValue(line.v)) : reject(getLineError())),
-      fail: reject,
+      push(line) {
+        isPending = false
+        if ('v' in line) resolve(parseValue(line.v))
+        else reject(getLineError())
+      },
+      fail(err) {
+        isPending = false
+        reject(err)
+      },
+      isPending: () => isPending,
     }
   },
 }

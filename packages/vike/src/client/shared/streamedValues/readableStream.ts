@@ -35,6 +35,7 @@ const readableStream: StreamedValueType = {
         else controller.enqueue(decodeChunk(line, parseValue))
       },
       fail: close,
+      isPending: () => !isClosed,
     }
   },
 }

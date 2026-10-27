@@ -22,7 +22,8 @@ function parsePageContextHtml(pageContextJson: string, abortSignal?: AbortSignal
   const linesQueued = Array.isArray(g.__vike_streamed) ? g.__vike_streamed : []
   g.__vike_streamed = { push: receiver.onLine }
   linesQueued.forEach(receiver.onLine)
-  return pageContext
+  assert(isObject(pageContext))
+  return { ...pageContext, _hasPendingStreamedValues: receiver.hasPendingValues }
 }
 
 // Client-side navigation: the `.pageContext.json` response (see server/runtime/renderPageServer/getPageContextJson.ts),
@@ -49,7 +50,7 @@ async function readPageContextJsonStreamed(
       receiver.fail(err)
     }
   })()
-  return pageContextFromServer
+  return { ...pageContextFromServer, _hasPendingStreamedValues: receiver.hasPendingValues }
 }
 
 async function* readLines(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<string> {

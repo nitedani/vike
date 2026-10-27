@@ -17,7 +17,12 @@ type StreamedValueType = {
   /** `parseValue()` parses the value of a `v` line, which can contain further streamed values */
   revive: (parseValue: (value: unknown) => unknown) => StreamedValue
 }
-type StreamedValue = { value: unknown; push: (line: Line) => void; fail: (err: unknown) => void }
+type StreamedValue = {
+  value: unknown
+  push: (line: Line) => void
+  fail: (err: unknown) => void
+  isPending: () => boolean
+}
 const types = [readableStream, promise, asyncIterable]
 
 // HANG_DESIGN: when the user navigates away, the values still pending neither resolve nor reject. The goals:
@@ -54,5 +59,6 @@ function createReceiver(abortSignal?: AbortSignal) {
       if (abortSignal?.aborted) return // See HANG_DESIGN
       streamedValues.forEach((streamedValue) => streamedValue.fail(err))
     },
+    hasPendingValues: () => [...streamedValues.values()].some((streamedValue) => streamedValue.isPending()),
   }
 }

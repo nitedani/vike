@@ -76,7 +76,7 @@ async function getPageContextFromHooksClient_firstRender(
   return pageContext
 }
 
-type PageContextFromHooksServer = { _hasPageContextFromServer: boolean }
+type PageContextFromHooksServer = { _hasPageContextFromServer: boolean; _hasPendingStreamedValues?: () => boolean }
 async function getPageContextFromHooksServer(
   pageContext: { pageId: string; abortSignal: AbortSignal } & PageContextCreatedClient,
   isErrorPage: boolean,

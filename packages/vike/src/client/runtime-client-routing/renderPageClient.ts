@@ -32,6 +32,7 @@ import {
   addLinkPrefetchHandlers_watch,
   getPageContextPrefetched,
   populatePageContextPrefetchCache,
+  abortPrefetchesOfOtherPages,
 } from './prefetch.js'
 import { type PageContextBeforeRenderClient, execHookOnRenderClient } from '../shared/execHookOnRenderClient.js'
 import {
@@ -244,7 +245,7 @@ async function renderPageClient(renderArgs: RenderArgs) {
 
     // Abort the previous navigation and the shown page, before waiting for the shown page's onRenderClient() below
     // - We abort after routing: a navigation cancelled by `throw abort()`, or a doNotRenderIfSamePage navigation to the shown page, returns above and leaves the shown page untouched
-    abortPreviousNavigation(abortController)
+    abortPreviousNavigation(abortController, pageContext.urlPathname)
 
     // Ensure no concurrent onRenderClient() calls.
     // - We could `await globalObject.onRenderClientPreviousPromise` later just before execHookOnRenderClient() but we prefer doing it early to ensure `getPageContext() === usePageContext()` (and maybe it prevents other potential inconsistencies?).
@@ -379,7 +380,7 @@ async function renderPageClient(renderArgs: RenderArgs) {
     const pageContext = await getPageContextBegin(true, pageContextBeginArgs)
     if (isRenderOutdated()) return
     // The error page replaces the shown page, and the error may have been thrown by routing, before the shown page was aborted and its onRenderClient() awaited
-    abortPreviousNavigation(abortController)
+    abortPreviousNavigation(abortController, pageContext.urlPathname)
     await globalObject.onRenderClientPreviousPromise
     if (isRenderOutdated()) return
     objectAssign(pageContext, {
@@ -764,13 +765,15 @@ function getRenderCount(): number {
 
 // Abort the previous navigation: their hooks can use pageContext.abortSignal to stop, e.g. +data or +onRenderClient
 // - It also aborts streamed values of the current shown page
-function abortPreviousNavigation(abortControllerNew: AbortController) {
+// - It also aborts streamed values of the pageContexts prefetched for other pages, once received
+function abortPreviousNavigation(abortControllerNew: AbortController, urlPathname: string) {
   // A navigation may call it twice: after routing, then upon an error
   if (globalObject.abortController === abortControllerNew) return
   // Old abortController
   globalObject.abortController?.abort()
   // New abortController
   globalObject.abortController = abortControllerNew
+  abortPrefetchesOfOtherPages(urlPathname)
 }
 
 function getKeepScrollPositionSetting(
