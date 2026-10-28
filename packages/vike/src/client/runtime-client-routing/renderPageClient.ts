@@ -129,7 +129,6 @@ async function renderPageClient(renderArgs: RenderArgs) {
     pageContextsAborted = [],
   } = renderArgs
   let { scrollTarget } = renderArgs
-  const { previousPageContext } = globalObject
 
   const abortController = new AbortController()
   const { isRenderOutdated, setHydrationCanBeAborted, setOnRenderClientCalled, isFirstRender } =
@@ -157,6 +156,9 @@ async function renderPageClient(renderArgs: RenderArgs) {
     await globalObject.hydrationAwaitPromise
     if (isRenderOutdated()) return
   }
+
+  // Read after awaiting hydration, so that it's the page the user sees
+  const { previousPageContext } = globalObject
 
   return await renderPageNominal()
 
@@ -497,6 +499,8 @@ async function renderPageClient(renderArgs: RenderArgs) {
 
     // throw render('/some-url')
     if (pageContextAbort._urlRewrite) {
+      // The new rendering replaces this one: it shouldn't wait for this rendering to end
+      globalObject.hydrationAwaitPromiseResolve()
       await renderPageClient({
         ...renderArgs,
         scrollTarget: undefined,
@@ -513,6 +517,8 @@ async function renderPageClient(renderArgs: RenderArgs) {
         redirectHard(urlRedirect)
         return { skip: true }
       } else {
+        // The new rendering replaces this one: it shouldn't wait for this rendering to end
+        globalObject.hydrationAwaitPromiseResolve()
         await renderPageClient({
           ...renderArgs,
           scrollTarget: undefined,
@@ -584,6 +590,8 @@ async function renderPageClient(renderArgs: RenderArgs) {
         await onError(err)
         if (!isErrorPage) return
       }
+      // Hydration is over: the navigations waiting for it can now render
+      globalObject.hydrationAwaitPromiseResolve()
       if (isRenderOutdated(true)) return
     }
 
@@ -859,7 +867,7 @@ function createPageContextFromServer_experimentalRSC(
     (pageContext as PageContextClient & { _originalObject: Record<string, unknown> })._originalObject,
   )
   objectAssign(pageContextNew, pageContextFromServerCopy)
-  // A navigation reads previousPageContext when it starts, sets currentPageContext after routing, and sets previousPageContext when it renders
+  // A navigation reads previousPageContext after awaiting hydration (unless +hydrationCanBeAborted), sets currentPageContext after routing, and sets previousPageContext when it renders
   if (globalObject.currentPageContext === globalObject.previousPageContext) {
     globalObject.currentPageContext = pageContextNew
   } else {
